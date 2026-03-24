@@ -53,31 +53,15 @@ export const SuiIcon = ({ className = 'w-5 h-5' }) => (
 );
 
 export const MonadIcon = ({ className = 'w-5 h-5' }) => (
-  <svg viewBox="0 0 32 32" className={className} fill="none">
-    <circle cx="16" cy="16" r="16" fill="#8147FF"/>
-    <path d="M16 8L8 24H12L16 16L20 24H24L16 8Z" fill="white"/>
-  </svg>
+  <img src="/monad.png" className={`${className} object-contain`} alt="Monad" />
 );
 
 export const PulseChainIcon = ({ className = 'w-5 h-5' }) => (
-  <svg viewBox="0 0 32 32" className={className} fill="none">
-    <path d="M16 0L2 8V24L16 32L30 24V8L16 0Z" fill="url(#pulse_grad)"/>
-    <defs>
-      <linearGradient id="pulse_grad" x1="0" y1="0" x2="32" y2="32">
-        <stop offset="0%" stopColor="#00E5FF"/>
-        <stop offset="100%" stopColor="#FF00E5"/>
-      </linearGradient>
-    </defs>
-    <path d="M16 8L10 16L16 24L22 16L16 8Z" fill="white"/>
-  </svg>
+  <img src="/pulsechain.png" className={`${className} object-contain`} alt="PulseChain" />
 );
 
 export const QuaiIcon = ({ className = 'w-5 h-5' }) => (
-  <svg viewBox="0 0 32 32" className={className} fill="none">
-    <circle cx="16" cy="16" r="16" fill="#CCFF00"/>
-    <path d="M16 8C11.6 8 8 11.6 8 16c0 2.2 0.9 4.2 2.3 5.7L16 16 21.7 10.3C20.2 8.9 18.2 8 16 8z" fill="black"/>
-    <path d="M16 24c4.4 0 8-3.6 8-8 0-2.2-0.9-4.2-2.3-5.7L16 16l-5.7 5.7c1.5 1.4 3.5 2.3 16 2.3z" fill="black" opacity="0.8"/>
-  </svg>
+  <img src="/quai.png" className={`${className} rounded-md object-contain`} alt="Quai" />
 );
 
 export const TronIcon = ({ className = 'w-5 h-5' }) => (
