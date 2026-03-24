@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "Boltwallet",
+    "slug": "boltwallet-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/logo.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0a0b"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.boltwallet.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#0a0a0b"
+      },
+      "package": "com.boltwallet.app"
+    },
+    "web": {
+      "favicon": "./assets/logo.png"
+    }
+  }
+}

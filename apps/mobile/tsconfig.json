@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-native",
+    "baseUrl": ".",
+    "paths": {
+      "@boltwallet/core": ["../../packages/core/src"],
+      "@boltwallet/ui": ["../../packages/ui/src"]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "../../packages/core/src/**/*",
+    "../../packages/ui/src/**/*"
+  ]
+}
