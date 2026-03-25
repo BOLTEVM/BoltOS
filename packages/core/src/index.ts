@@ -38,6 +38,10 @@ import {
   getGasPriceEstimates as owsGetGasPriceEstimates,
   // @ts-ignore
   resetVault as owsResetVault,
+  // @ts-ignore
+  setSessionMnemonic as owsSetSessionMnemonic,
+  // @ts-ignore
+  getSessionMnemonic as owsGetSessionMnemonic,
   WalletInfo,
   SignResult
 } from "@open-wallet-standard/core";
@@ -203,6 +207,14 @@ export class BoltwalletCore {
 
   async getAssetPrices(): Promise<Record<string, number>> {
     return owsGetAssetPrices();
+  }
+
+  async setSession(mnemonic: string | null): Promise<void> {
+    return owsSetSessionMnemonic(mnemonic);
+  }
+
+  async getSession(): Promise<string | null> {
+    return owsGetSessionMnemonic();
   }
 
   async getNativeBalance(address: string): Promise<string> {

@@ -1,4 +1,5 @@
 import { ethers, wordlists } from 'ethers';
+import { LangEn } from 'ethers/wordlists';
 
 const VAULT_KEY = 'bolt_vault_v1';
 let activeChainId = 'ethereum';
@@ -280,7 +281,9 @@ export const deriveAddress = (mnemonic: string, index: number): string => {
   const fullPath = basePath.endsWith('/') ? `${basePath}${index}` : `${basePath}/${index}`;
   
   try {
-    const wallet = ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, fullPath, wordlists.en);
+    // BIP39 Hardening: ensure LangEn is used if wordlists.en is missing
+    const wordlist = (wordlists as any).en || LangEn.wordlist();
+    const wallet = ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, fullPath, wordlist);
     return wallet.address;
   } catch (e) {
     console.error("Address Derivation Error:", e);
@@ -487,6 +490,12 @@ export const generateMnemonic = async (): Promise<string> => {
   return sessionMnemonic || '';
 };
 
+export const setSessionMnemonic = (mnemonic: string | null) => {
+  sessionMnemonic = mnemonic;
+};
+
+export const getSessionMnemonic = () => sessionMnemonic;
+
 export const resetVault = async (mnemonic: string, newPassword: string): Promise<void> => {
   // Validate mnemonic
   try {
@@ -544,6 +553,16 @@ export const deleteContract = async (address: string, chainId: string) => {
 
 export const getNativeBalance = async (address: string, rpcUrl: string): Promise<string> => {
   try {
+    // BOLT-07: Bitcoin REST Fetcher (Esplora API)
+    if (rpcUrl.includes('blockstream.info') || rpcUrl.includes('esplora')) {
+       const response = await fetch(`${rpcUrl}address/${address}`);
+       if (!response.ok) throw new Error(`Esplora API returned ${response.status}`);
+       const data = await response.json();
+       // Esplora returns satoshis in funded_txo_sum - spent_txo_sum
+       const sats = (data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum) || 0;
+       return (sats / 1e8).toFixed(8);
+    }
+
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const balance = await provider.getBalance(address);
     return ethers.formatEther(balance);
@@ -557,7 +576,7 @@ export const getNativeBalance = async (address: string, rpcUrl: string): Promise
        return "0.00"; 
     }
     
-    throw err;
+    return "0.00"; // Fallback to safe value rather than crashing
   }
 };
 

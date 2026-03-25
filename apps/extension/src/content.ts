@@ -21,8 +21,22 @@ injectProvider();
 // Listen for messages from the provider to forward to background (WYSIWYS security layer)
 window.addEventListener('message', (event) => {
   if (event.source !== window) return;
-  if (event.data?.source === 'bolt-provider') {
-    // Relay to background or popup
-    console.info('Boltwallet Security: Intercepted dApp request', event.data.payload);
+  if (event.data?.source === 'bolt-provider' && event.data?.payload) {
+    // Relay to background
+    const { id, payload } = event.data;
+    // @ts-ignore
+    chrome.runtime.sendMessage({ 
+      type: 'BOLT_RPC_REQUEST', 
+      id, 
+      payload 
+    }, (response: any) => {
+      // Send response back to the provider window
+      window.postMessage({ 
+        source: 'bolt-provider', 
+        id, 
+        result: response?.result, 
+        error: response?.error 
+      }, '*');
+    });
   }
 });

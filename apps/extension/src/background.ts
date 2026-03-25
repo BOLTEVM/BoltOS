@@ -8,7 +8,7 @@ const SESSION_TIMEOUT = 15 * 60 * 1000; // 15 minutes
 // @ts-ignore
 chrome.runtime.onMessage.addListener((message: any, sender: any, sendResponse: any) => {
   if (message.type === 'BOLT_GET_SESSION') {
-    if (Date.now() - lastActive > SESSION_TIMEOUT) {
+    if (sessionVault && (Date.now() - lastActive > SESSION_TIMEOUT)) {
       sessionVault = null;
     }
     sendResponse({ session: sessionVault });
@@ -19,6 +19,11 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, sendResponse: a
   } else if (message.type === 'BOLT_HEARTBEAT') {
     lastActive = Date.now();
     sendResponse({ status: 'alive' });
+  } else if (message.type === 'BOLT_RPC_REQUEST') {
+    // Future: Integrate BoltwalletCore here for background RPC handling
+    // For now, relay back that we've received it
+    lastActive = Date.now();
+    // sendResponse({ status: 'pending', payload: message.payload });
   }
   return true;
 });

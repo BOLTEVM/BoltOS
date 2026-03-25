@@ -6,13 +6,42 @@
     isBoltwallet: true,
     request: async (args: any) => {
       console.log('Boltwallet Request:', args);
-      // Relay message to content script
-      window.postMessage({ source: 'bolt-provider', payload: args }, '*');
+      
+      // Handle common read-only requests locally or relay to content script
+      if (args.method === 'eth_accounts') {
+        // This will normally be handled by the background script's response
+        // but we'll relay for approval
+      }
+      
+      return new Promise((resolve, reject) => {
+        const id = Math.random().toString(36).substring(7);
+        
+        const listener = (event: any) => {
+          if (event.data?.source === 'bolt-provider' && event.data?.id === id) {
+             window.removeEventListener('message', listener);
+             if (event.data.error) reject(event.data.error);
+             else resolve(event.data.result);
+          }
+        };
+        
+        window.addEventListener('message', listener);
+        window.postMessage({ 
+          source: 'bolt-provider', 
+          id,
+          payload: args 
+        }, '*');
+      });
+    },
+    on: (eventName: string, handler: Function) => {
+       console.log('Boltwallet: Subscribed to', eventName);
+    },
+    removeListener: (eventName: string, handler: Function) => {
+       console.log('Boltwallet: Unsubscribed from', eventName);
     },
     version: '1.0.0'
   };
 
   (window as any).ows = provider;
-  // Standard shim for EIP-1193 if desired in the future
-  // (window as any).ethereum = provider; 
+  // Shim for ethers/web3 detection
+  (window as any).ethereum = provider; 
 })();

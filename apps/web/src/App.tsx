@@ -150,10 +150,26 @@ const App = () => {
     }
 
     const initSecurity = async () => {
+      // 1. Check for background session (Extension Bridge)
+      // @ts-ignore
+      if (window.chrome?.runtime?.id) {
+         // @ts-ignore
+         window.chrome.runtime.sendMessage({ type: 'BOLT_GET_SESSION' }, async (response: any) => {
+            if (response?.session) {
+               await core.setSession(response.session);
+               setIsLocked(false);
+               const loadedWallets = await core.getWallets();
+               setWallets(loadedWallets);
+               const mnemon = await core.getSession();
+               setMnemonic(mnemon || '');
+            }
+         });
+      }
+
       const prepared = await core.isVaultSetup();
       setIsVaultPrepared(prepared);
       if (prepared) {
-        setIsLocked(core.isVaultLocked());
+        setIsLocked(await core.isVaultLocked());
       } else {
         setIsLocked(true);
       }
@@ -251,6 +267,12 @@ const App = () => {
       console.error("Vault Setup Error:", err);
       setPasswordError("Failed to setup vault");
     } finally {
+      // Broadcast session to background
+      // @ts-ignore
+      if (window.chrome?.runtime?.id) {
+        // @ts-ignore
+        window.chrome.runtime.sendMessage({ type: 'BOLT_SET_SESSION', session: mnemonic });
+      }
       setIsSending(false);
     }
   };
@@ -262,9 +284,16 @@ const App = () => {
       setIsLocked(false);
       const loadedWallets = await core.getWallets();
       setWallets(loadedWallets);
-      const mnemon = await core.generateMnemonic();
-      setMnemonic(mnemon);
+      const mnemon = await core.getSession();
+      setMnemonic(mnemon || '');
       setPassword('');
+
+      // Broadcast session to background
+      // @ts-ignore
+      if (window.chrome?.runtime?.id) {
+        // @ts-ignore
+        window.chrome.runtime.sendMessage({ type: 'BOLT_SET_SESSION', session: mnemon });
+      }
     } else {
       setPasswordError("Incorrect password");
     }
