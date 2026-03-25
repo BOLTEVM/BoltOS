@@ -21,12 +21,12 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self';"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://*.ankr.com https://*.llamarpc.com https://*.pulsechain.com https://*.monad.xyz https://*.sui.io https://*.xrpl.org https://*.bittorrentchain.io https://blockstream.info https://hermes.pyth.network;"
   },
   "host_permissions": [
     "https://hermes.pyth.network/*",
     "https://*.llamarpc.com/*",
-    "https://rpc.ankr.com/*",
+    "https://*.ankr.com/*",
     "https://rpc.pulsechain.com/*",
     "https://rpc.monad.xyz/*",
     "https://fullnode.mainnet.sui.io/*",
