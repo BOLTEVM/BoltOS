@@ -21,7 +21,7 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://*.ankr.com https://*.llamarpc.com https://*.pulsechain.com https://*.monad.xyz https://*.sui.io https://*.xrpl.org https://*.bittorrentchain.io https://blockstream.info https://hermes.pyth.network;"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://*.ankr.com https://*.llamarpc.com https://*.pulsechain.com https://*.monad.xyz https://*.sui.io https://*.xrpl.org https://*.bittorrentchain.io https://blockstream.info https://hermes.pyth.network https://quaiscan.io;"
   },
   "host_permissions": [
     "https://hermes.pyth.network/*",
