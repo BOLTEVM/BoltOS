@@ -8,6 +8,16 @@
     "default_icon": "logo.png"
   },
   "permissions": ["storage", "activeTab"],
+  "host_permissions": [
+    "https://hermes.pyth.network/*",
+    "https://*.llamarpc.com/*",
+    "https://rpc.ankr.com/*",
+    "https://rpc.pulsechain.com/*",
+    "https://rpc.monad.xyz/*",
+    "https://fullnode.mainnet.sui.io/*",
+    "https://rpc-evm-sidechain.xrpl.org/*",
+    "https://rpc.bittorrentchain.io/*"
+  ],
   "icons": {
     "128": "logo.png"
   }

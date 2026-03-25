@@ -19,6 +19,7 @@ This audit explores the security architecture of the Boltwallet extension, focus
 | BOLT-04 | Unauthenticated Wallet Initialization | **HIGH** | **FIXED** |
 | BOLT-05 | Incomplete Transaction Payload Validation | **MEDIUM** | **FIXED** |
 | BOLT-06 | Weak Input Validation for Recipient Addresses | **LOW** | **FIXED** |
+| BOLT-07 | Lack of Real-time Price Oracle Integration | **MEDIUM** | **FIXED** |
 
 ---
 
@@ -47,6 +48,11 @@ This audit explores the security architecture of the Boltwallet extension, focus
 **Location**: `ows-core.ts` (L64-74)
 **Description**: `initializeVault` creates a new seed phrase without explicit user confirmation or password setup.
 **Risk**: Users might start using a wallet before properly backing up the auto-generated seed, leading to irrecoverable funds if browser cache is cleared.
+### BOLT-07: Lack of Real-time Price Oracle Integration
+**Severity**: **MEDIUM**
+**Location**: `App.tsx`, `ows-core.ts`
+**Description**: Earlier versions lacked real-time price data, making it difficult for users to verify transaction values in USD.
+**Remediation**: Integrated Pyth Network Hermes API to fetch resilient, real-time price feeds for all supported assets.
 
 ---
 

@@ -30,6 +30,10 @@ import {
   unlockVault as owsUnlockVault,
   // @ts-ignore
   isVaultLocked as owsIsVaultLocked,
+  // @ts-ignore
+  getAssetPrices as owsGetAssetPrices,
+  // @ts-ignore
+  getNativeBalance as owsGetNativeBalance,
   WalletInfo,
   SignResult
 } from "@open-wallet-standard/core";
@@ -176,5 +180,13 @@ export class BoltwalletCore {
 
   isVaultLocked(): boolean {
     return owsIsVaultLocked();
+  }
+
+  async getAssetPrices(): Promise<Record<string, number>> {
+    return owsGetAssetPrices();
+  }
+
+  async getNativeBalance(address: string): Promise<string> {
+    return owsGetNativeBalance(address, this.currentChain.rpc);
   }
 }

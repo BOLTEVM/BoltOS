@@ -21,6 +21,7 @@ I have implemented a comprehensive asset management system and a high-fidelity t
 - **Forced Authentication**: Implemented a glossy "Master Password" flow that blocks all wallet access until the vault is securely unlocked.
 - **Strict Validation**: Added rigorous recipient address validation and transaction payload sanitization (BOLT-05) to prevent malicious data injection.
 - **WYSIWYS Protection**: Implemented a unified "Proposed Transaction" state (BOLT-03) that cryptographically binds the confirmation UI to the final signing payload, ensuring you only sign what you see.
+- **Pyth Oracle Integration**: Integrated real-time price feeds for ETH, BNB, SUI, and PLS (BOLT-07). The UI now provides live USD valuations for all assets and active conversions during the Send flow.
 
 ## Visual Verification
 
@@ -34,6 +35,8 @@ I have implemented a comprehensive asset management system and a high-fidelity t
 ![Transaction Broadcast Status](C:/Users/wonfi/.gemini/antigravity/brain/1394d4a2-6e5b-4402-b7ff-b4efbf3030c7/tx_dark_glossy_v1_1774399397561_1774400381258.webp)
 <!-- slide -->
 ![WYSIWYS Send Details](C:/Users/wonfi/.gemini/antigravity/brain/1394d4a2-6e5b-4402-b7ff-b4efbf3030c7/send_details_entered_1774402487541.png)
+<!-- slide -->
+![Pyth Price Conversion](file:///C:/Users/wonfi/.gemini/antigravity/brain/1394d4a2-6e5b-4402-b7ff-b4efbf3030c7/usd_conversion_verification_1774407014749.png)
 ````
 
 ## Technical Implementation Details

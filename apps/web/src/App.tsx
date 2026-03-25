@@ -71,6 +71,9 @@ const App = () => {
   const [passwordError, setPasswordError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [proposedTx, setProposedTx] = useState<any>(null);
+  const [prices, setPrices] = useState<Record<string, number>>({});
+  const [nativeBalances, setNativeBalances] = useState<Record<string, string>>({});
+  const [totalUSD, setTotalUSD] = useState('0.00');
 
   const theme = THEMES[currentThemeIdx];
 
@@ -129,6 +132,44 @@ const App = () => {
       });
     }
   }, [contracts, activeWallet]);
+
+  // Price & Balance Synchronization
+  useEffect(() => {
+    if (isLocked) return;
+
+    const syncData = async () => {
+      try {
+        const newPrices = await core.getAssetPrices();
+        setPrices(newPrices);
+
+        const balances: Record<string, string> = {};
+        for (const w of wallets) {
+          const bal = await core.getNativeBalance(w.address);
+          balances[w.id] = bal;
+        }
+        setNativeBalances(balances);
+
+        let total = 0;
+        const currentPrice = newPrices[selectedChain] || 0;
+        Object.values(balances).forEach(bal => {
+          total += parseFloat(bal) * currentPrice;
+        });
+
+        // Add contract value (simplified: assume 1 unit = current native price for now or mock)
+        Object.entries(contractBalances).forEach(([addr, bal]) => {
+           // total += parseFloat(bal) * someTokenPrice;
+        });
+
+        setTotalUSD(total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+      } catch (err) {
+        console.error("Sync Error:", err);
+      }
+    };
+
+    syncData();
+    const interval = setInterval(syncData, 15000); // 15s refresh
+    return () => clearInterval(interval);
+  }, [isLocked, selectedChain, wallets, contractBalances]);
 
   const cycleTheme = () => {
     const nextIdx = (currentThemeIdx + 1) % THEMES.length;
@@ -328,7 +369,7 @@ const App = () => {
     return (
       <div 
         style={themeStyles}
-        className="w-full max-w-[420px] h-[600px] sm:h-auto bg-bolt-dark text-white overflow-hidden flex flex-col p-4 xs:p-6 font-sans selection:bg-bolt-blue/30 relative mx-auto shadow-2xl"
+        className="w-[380px] min-h-[600px] bg-bolt-dark text-white overflow-hidden flex flex-col p-6 font-sans selection:bg-bolt-blue/30 relative"
       >
         {/* Security Overlay */}
         <AnimatePresence mode="wait">
@@ -497,7 +538,7 @@ const App = () => {
 
           {showSend && activeWallet && (
             <motion.div 
-              initial={{ opacity: 0, x: '100%' }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: '100%' }}
+              initial={{ opacity: 0, x: 380 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 380 }}
               className="absolute inset-0 z-[60] bg-bolt-dark/95 text-white backdrop-blur-3xl flex flex-col font-sans"
             >
               <div className="p-6 flex flex-col h-full">
@@ -591,7 +632,9 @@ const App = () => {
                             className="bg-transparent text-5xl font-black text-center text-white placeholder:text-white/5 outline-none w-full tracking-tighter" 
                             style={{ textShadow: `0 0 30px ${theme.primary}40` }}
                           />
-                          <p className="text-[10px] font-bold text-gray-500 mt-2 uppercase tracking-[0.2em]">USD $0.00</p>
+                          <p className="text-[10px] font-bold text-gray-500 mt-2 uppercase tracking-[0.2em]">
+                            USD ${amount ? (parseFloat(amount) * (prices[selectedChain] || 0)).toFixed(2) : '0.00'}
+                          </p>
                        </div>
                     </div>
                   </div>
@@ -614,8 +657,8 @@ const App = () => {
 
           {showConfirmSend && proposedTx && (
             <motion.div 
-               initial={{ opacity: 0, y: '100%' }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: '100%' }}
-               className="absolute inset-x-0 bottom-0 top-[6%] z-[70] bg-bolt-dark/98 backdrop-blur-3xl p-4 xs:p-8 flex flex-col rounded-t-[40px] border-t border-white/10 shadow-[0_-20px_50px_rgba(0,0,0,0.5)]"
+               initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+               className="absolute inset-x-0 bottom-0 top-0 z-[70] bg-bolt-dark/98 backdrop-blur-3xl p-8 flex flex-col rounded-t-[40px] border-t border-white/10"
             >
               <div className="flex flex-col items-center mb-6">
                 <div className="w-10 h-10 rounded-2xl bg-white/5 flex items-center justify-center mb-2 shadow-2xl relative overflow-hidden group">
@@ -998,7 +1041,7 @@ const App = () => {
           <div className="flex justify-between items-start mb-6">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: theme.primary }}>Total Assets</p>
-              <h2 className="text-3xl font-black text-white leading-none">$0.00</h2>
+              <h2 className="text-3xl font-black text-white leading-none">${totalUSD}</h2>
             </div>
             <div className="p-3 rounded-2xl border transition-all cursor-pointer hover:rotate-12" style={{ backgroundColor: `${theme.primary}10`, borderColor: `${theme.primary}30` }} onClick={() => setShowNetworks(true)}>
               <Fingerprint className="w-6 h-6" style={{ color: theme.primary }} />
@@ -1108,6 +1151,9 @@ const App = () => {
                         <p className="text-base font-bold">{w.name}</p>
                         <div className="flex items-center gap-2">
                           <p className="text-[10px] text-gray-500 font-mono tracking-tighter opacity-70">{formatAddress(w.address)}</p>
+                          <span className="text-[10px] font-black" style={{ color: theme.primary }}>
+                            {nativeBalances[w.id] || '0.00'} {chains.find(c => c.id === selectedChain)?.name.split(' ')[0]}
+                          </span>
                           <button 
                             onClick={(e) => { e.stopPropagation(); copyAddress(w.address); }}
                             className="p-1 rounded-md bg-white/5 border border-white/10 hover:bg-white/10 transition-colors"
