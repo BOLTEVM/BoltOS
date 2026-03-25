@@ -15,7 +15,7 @@ export const CHAINS: Record<string, ChainConfig> = {
   ethereum: {
     name: "Ethereum",
     id: "1",
-    rpc: "https://eth.llamarpc.com",
+    rpc: "https://rpc.ankr.com/eth",
     explorer: "https://etherscan.io",
     nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
     derivationPath: "m/44'/60'/0'/0/0"
@@ -31,7 +31,7 @@ export const CHAINS: Record<string, ChainConfig> = {
   polygon: {
     name: "Polygon",
     id: "137",
-    rpc: "https://polygon-rpc.com",
+    rpc: "https://rpc.ankr.com/polygon",
     explorer: "https://polygonscan.com",
     nativeCurrency: { name: "MATIC", symbol: "MATIC", decimals: 18 },
     derivationPath: "m/44'/60'/0'/0/0"
@@ -55,7 +55,7 @@ export const CHAINS: Record<string, ChainConfig> = {
   monad: {
     name: "Monad",
     id: "143",
-    rpc: "https://rpc.monad.xyz",
+    rpc: "https://rpc.ankr.com/monad",
     explorer: "https://monadvision.com",
     nativeCurrency: { name: "Monad", symbol: "MON", decimals: 18 },
     derivationPath: "m/44'/60'/0'/0/0"
@@ -63,7 +63,7 @@ export const CHAINS: Record<string, ChainConfig> = {
   bitcoin: {
     name: "Bitcoin",
     id: "bitcoin",
-    rpc: "https://blockstream.info/api/",
+    rpc: "https://rpc.ankr.com/btc",
     explorer: "https://blockchain.info",
     nativeCurrency: { name: "Bitcoin", symbol: "BTC", decimals: 8 },
     derivationPath: "m/84'/0'/0'/0/0"
@@ -71,7 +71,7 @@ export const CHAINS: Record<string, ChainConfig> = {
   sui: {
     name: "Sui",
     id: "sui:mainnet",
-    rpc: "https://fullnode.mainnet.sui.io:443",
+    rpc: "https://rpc.ankr.com/sui",
     explorer: "https://suiexplorer.com",
     nativeCurrency: { name: "Sui", symbol: "SUI", decimals: 9 },
     derivationPath: "m/44'/784'/0'/0'/0'"

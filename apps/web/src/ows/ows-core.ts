@@ -548,24 +548,66 @@ export const deleteContract = async (address: string, chainId: string) => {
 
 export const getNativeBalance = async (address: string, rpcUrl: string): Promise<string> => {
   try {
-    // BOLT-07: Bitcoin REST Fetcher (Esplora API)
-    if (rpcUrl.includes('blockstream.info') || rpcUrl.includes('esplora')) {
+    // BOLT-07: Bitcoin Fetcher (Esplora REST or Ankr RPC)
+    if (rpcUrl.includes('bitcoin') || rpcUrl.includes('btc')) {
        const apiKey = (import.meta as any).env?.VITE_BOLT_API_KEY || "";
-       const response = await fetch(`${rpcUrl}address/${address}`, {
-         headers: apiKey ? { 'x-api-key': apiKey } : {}
-       });
-       if (!response.ok) throw new Error(`Esplora API returned ${response.status}`);
-       const data = await response.json();
-       // Esplora returns satoshis in funded_txo_sum - spent_txo_sum
-       const sats = (data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum) || 0;
-       return (sats / 1e8).toFixed(8);
+       
+       // Case A: Ankr Bitcoin RPC
+       if (rpcUrl.includes('ankr.com')) {
+          const base = rpcUrl.endsWith('/') ? rpcUrl.slice(0, -1) : rpcUrl;
+          const finalUrl = apiKey ? `${base}/${apiKey}` : base;
+          
+          const response = await fetch(finalUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: 1,
+              method: 'ankr_getAccountBalance',
+              params: {
+                walletAddress: address,
+                blockchain: ['btc']
+              }
+            })
+          });
+          
+          if (response.ok) {
+             const data = await response.json();
+             const btcAsset = data.result?.assets?.find((a: any) => a.blockchain === 'btc');
+             if (btcAsset) return btcAsset.balance;
+          }
+       }
+
+       // Case B: Esplora REST Fallback
+       if (rpcUrl.includes('blockstream.info') || rpcUrl.includes('esplora')) {
+          const response = await fetch(`${rpcUrl}address/${address}`, {
+            headers: apiKey ? { 'x-api-key': apiKey } : {}
+          });
+          if (!response.ok) throw new Error(`Esplora API returned ${response.status}`);
+          const data = await response.json();
+          const sats = (data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum) || 0;
+          return (sats / 1e8).toFixed(8);
+       }
     }
 
     const apiKey = (import.meta as any).env?.VITE_BOLT_API_KEY || "";
-    const fetchReq = new ethers.FetchRequest(rpcUrl);
-    if (apiKey) {
+    let finalRpcUrl = rpcUrl;
+    
+    // BOLT-08: Tailored Ankr Premium Support
+    // Ankr prefers keys in the URL: https://rpc.ankr.com/eth/<api_key>
+    if (apiKey && rpcUrl.includes('rpc.ankr.com')) {
+       // Ensure we don't double-append if the URL already has a key or ends in a slash
+       const base = rpcUrl.endsWith('/') ? rpcUrl.slice(0, -1) : rpcUrl;
+       finalRpcUrl = `${base}/${apiKey}`;
+    }
+
+    const fetchReq = new ethers.FetchRequest(finalRpcUrl);
+    
+    // Only use header for non-Ankr sources that might support it (like custom Blockstream/Esplora)
+    if (apiKey && !rpcUrl.includes('rpc.ankr.com')) {
       fetchReq.setHeader("x-api-key", apiKey);
     }
+
     const provider = new ethers.JsonRpcProvider(fetchReq, undefined, {
        staticNetwork: true,
        batchMaxCount: 1
@@ -589,8 +631,15 @@ export const getNativeBalance = async (address: string, rpcUrl: string): Promise
 export const getContractBalance = async (contractAddress: string, walletAddress: string, decimals: number, rpcUrl: string): Promise<string> => {
    try {
      const apiKey = (import.meta as any).env?.VITE_BOLT_API_KEY || "";
-     const fetchReq = new ethers.FetchRequest(rpcUrl);
-     if (apiKey) {
+     let finalRpcUrl = rpcUrl;
+     
+     if (apiKey && rpcUrl.includes('rpc.ankr.com')) {
+        const base = rpcUrl.endsWith('/') ? rpcUrl.slice(0, -1) : rpcUrl;
+        finalRpcUrl = `${base}/${apiKey}`;
+     }
+
+     const fetchReq = new ethers.FetchRequest(finalRpcUrl);
+     if (apiKey && !rpcUrl.includes('rpc.ankr.com')) {
        fetchReq.setHeader("x-api-key", apiKey);
      }
      const provider = new ethers.JsonRpcProvider(fetchReq, undefined, {
