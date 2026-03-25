@@ -7,7 +7,22 @@
     "default_popup": "index.html",
     "default_icon": "logo.png"
   },
-  "permissions": ["storage", "activeTab"],
+  "permissions": ["storage", "activeTab", "history", "scripting"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self';"
+  },
   "host_permissions": [
     "https://hermes.pyth.network/*",
     "https://*.llamarpc.com/*",
@@ -16,7 +31,10 @@
     "https://rpc.monad.xyz/*",
     "https://fullnode.mainnet.sui.io/*",
     "https://rpc-evm-sidechain.xrpl.org/*",
-    "https://rpc.bittorrentchain.io/*"
+    "https://rpc.bittorrentchain.io/*",
+    "https://quaiscan.io/*",
+    "https://polygon-rpc.com/*",
+    "https://blockstream.info/*"
   ],
   "icons": {
     "128": "logo.png"

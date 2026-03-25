@@ -1,14 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Wallet, Shield, Zap, Globe, Cpu, ArrowRight, CheckCircle2, 
-  Copy, ExternalLink, Settings, Plus, Menu, X, ChevronRight, 
-  Fingerprint, Send, ChevronDown, Search, Info, RefreshCw,
-  Trash2, Eye, EyeOff, Key, ArrowLeft, User, Users
+  Plus, 
+  Send, 
+  Shield, 
+  Cpu, 
+  Globe, 
+  Zap, 
+  Copy, 
+  Trash2, 
+  Fingerprint, 
+  ChevronRight, 
+  Lock,
+  History,
+  Search,
+  RefreshCw,
+  ExternalLink,
+  Wallet,
+  ArrowRight,
+  CheckCircle2,
+  Settings,
+  Menu,
+  X,
+  ChevronDown,
+  Info,
+  Eye,
+  EyeOff,
+  Key,
+  ArrowLeft,
+  User,
+  Users
 } from 'lucide-react';
 import { Button } from '@boltwallet/ui';
 import { NetworkIcon } from './components/NetworkIcons';
-import { BoltwalletCore, WalletData, ContractData, NFTData } from '@boltwallet/core';
+import { BoltwalletCore, WalletData, ContractData, NFTData, CHAINS, HistoryData } from '@boltwallet/core';
 import { ethers } from 'ethers';
 
 const core = new BoltwalletCore() as any;
@@ -51,7 +76,11 @@ const App = () => {
   const [contractArgs, setContractArgs] = useState('');
   const [contractBalances, setContractBalances] = useState<Record<string, string>>({});
   const [nfts, setNfts] = useState<NFTData[]>([]);
+  const [history, setHistory] = useState<HistoryData[]>([]);
   const [showNFTs, setShowNFTs] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState('all');
+  const [historySearch, setHistorySearch] = useState('');
   const [showImportNFT, setShowImportNFT] = useState(false);
   const [importNFTType, setImportNFTType] = useState<'erc721' | 'custom'>('erc721');
   const [newNFTName, setNewNFTName] = useState('');
@@ -74,6 +103,20 @@ const App = () => {
   const [prices, setPrices] = useState<Record<string, number>>({});
   const [nativeBalances, setNativeBalances] = useState<Record<string, string>>({});
   const [totalUSD, setTotalUSD] = useState('0.00');
+  const [gasSettings, setGasSettings] = useState({
+    priorityFee: '2',
+    maxFee: '40',
+    gasLimit: '21000',
+    speed: 'average'
+  });
+  const [gasEstimates, setGasEstimates] = useState<any>(null);
+  const [showGasModal, setShowGasModal] = useState(false);
+  const [showCustomGasModal, setShowCustomGasModal] = useState(false);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [recoveryMnemonic, setRecoveryMnemonic] = useState(Array(12).fill(''));
+  const [recoveryPassword, setRecoveryPassword] = useState('');
+  const [recoveryConfirmPassword, setRecoveryConfirmPassword] = useState('');
+  const [recoveryError, setRecoveryError] = useState('');
 
   const theme = THEMES[currentThemeIdx];
 
@@ -144,23 +187,30 @@ const App = () => {
 
         const balances: Record<string, string> = {};
         for (const w of wallets) {
+          if (!w.address || w.address === '0x0000000000000000000000000000000000000000') continue;
           const bal = await core.getNativeBalance(w.address);
           balances[w.id] = bal;
         }
         setNativeBalances(balances);
 
         let total = 0;
-        const currentPrice = newPrices[selectedChain] || 0;
+        const nativePrice = newPrices[selectedChain] || 0;
         Object.values(balances).forEach(bal => {
-          total += parseFloat(bal) * currentPrice;
+          total += parseFloat(bal) * nativePrice;
         });
 
-        // Add contract value (simplified: assume 1 unit = current native price for now or mock)
+        // Add contract balances to total (assuming $1 for tokens if price not found, for simplified but non-zero view)
         Object.entries(contractBalances).forEach(([addr, bal]) => {
-           // total += parseFloat(bal) * someTokenPrice;
+           const tokenPrice = newPrices[addr] || 1; // Fallback to $1 if token price not in map
+           total += parseFloat(bal) * tokenPrice;
         });
 
         setTotalUSD(total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+
+        if (activeWallet) {
+          const hist = await core.getHistory(activeWallet.id, 'all');
+          setHistory(hist);
+        }
       } catch (err) {
         console.error("Sync Error:", err);
       }
@@ -169,7 +219,7 @@ const App = () => {
     syncData();
     const interval = setInterval(syncData, 15000); // 15s refresh
     return () => clearInterval(interval);
-  }, [isLocked, selectedChain, wallets, contractBalances]);
+  }, [isLocked, selectedChain, wallets, contractBalances, activeWallet]);
 
   const cycleTheme = () => {
     const nextIdx = (currentThemeIdx + 1) % THEMES.length;
@@ -225,14 +275,13 @@ const App = () => {
     setIsCreating(true);
     setShowVaultAnimation(true);
     try {
-      await new Promise(r => setTimeout(r, 1500));
       const wallet = await core.createNewWallet(`Wallet ${wallets.length + 1}`);
       setWallets([...wallets, wallet]);
     } catch (err) {
       console.error("Failed to create wallet", err);
     } finally {
       setIsCreating(false);
-      setTimeout(() => setShowVaultAnimation(false), 500);
+      setShowVaultAnimation(false);
     }
   };
 
@@ -245,31 +294,120 @@ const App = () => {
     }
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!recipient || !amount || !activeWallet) return;
     if (!ethers.isAddress(recipient || '') && !(recipient as string).includes('.')) {
       alert("Invalid recipient address or ENS");
       return;
     }
+    
+    setIsSending(true);
+    try {
+      const estimates = await core.getGasPriceEstimates();
+      setGasEstimates(estimates);
+      setGasSettings({
+        priorityFee: estimates.average.priorityFee,
+        maxFee: estimates.average.maxFee,
+        gasLimit: '21000',
+        speed: 'average'
+      });
+      
+      setProposedTx({
+        to: recipient,
+        value: amount,
+        from: activeWallet.address,
+        maxFeePerGas: ethers.parseUnits(estimates.average.maxFee, 'gwei').toString(),
+        maxPriorityFeePerGas: ethers.parseUnits(estimates.average.priorityFee, 'gwei').toString(),
+        gasLimit: '21000',
+        timestamp: Date.now()
+      });
+      
+      setShowConfirmSend(true);
+      setSimulationStatus('success');
+      setEstimatedFee(`${estimates.average.speed.charAt(0).toUpperCase() + estimates.average.speed.slice(1)} · ~${(parseFloat(estimates.average.maxFee) * 21000 / 1e9).toFixed(5)}`);
+    } catch (err) {
+      console.error("Gas fetch failed", err);
+      // Fallback
+      setProposedTx({ to: recipient, value: amount, from: activeWallet.address });
+      setShowConfirmSend(true);
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleSelectSpeed = (speed: string) => {
+    if (!gasEstimates) return;
+    const tier = speed === 'fast' ? gasEstimates.fast : speed === 'slow' ? gasEstimates.slow : gasEstimates.average;
+    const newSettings = {
+      ...gasSettings,
+      priorityFee: tier.priorityFee,
+      maxFee: tier.maxFee,
+      speed
+    };
+    setGasSettings(newSettings);
     setProposedTx({
-      to: recipient,
-      value: amount,
-      from: activeWallet.address,
-      timestamp: Date.now()
+      ...proposedTx,
+      maxFeePerGas: ethers.parseUnits(tier.maxFee, 'gwei').toString(),
+      maxPriorityFeePerGas: ethers.parseUnits(tier.priorityFee, 'gwei').toString()
     });
-    setShowConfirmSend(true);
-    setSimulationStatus('success');
-    setEstimatedFee('Fast · <$0.01');
+    setEstimatedFee(`${speed.charAt(0).toUpperCase() + speed.slice(1)} · ~${(parseFloat(tier.maxFee) * parseInt(gasSettings.gasLimit) / 1e9).toFixed(5)}`);
+    setShowGasModal(false);
+  };
+
+  const handleSaveCustomGas = (customValues: any) => {
+    setGasSettings({ ...customValues, speed: 'custom' });
+    setProposedTx({
+      ...proposedTx,
+      maxFeePerGas: ethers.parseUnits(customValues.maxFee, 'gwei').toString(),
+      maxPriorityFeePerGas: ethers.parseUnits(customValues.priorityFee, 'gwei').toString(),
+      gasLimit: customValues.gasLimit
+    });
+    setEstimatedFee(`Custom · ~${(parseFloat(customValues.maxFee) * parseInt(customValues.gasLimit) / 1e9).toFixed(5)}`);
+    setShowCustomGasModal(false);
+    setShowGasModal(false);
+  };
+
+  const handleRecovery = async () => {
+    if (recoveryPassword !== recoveryConfirmPassword) {
+      setRecoveryError("Passwords do not match");
+      return;
+    }
+    if (recoveryPassword.length < 8) {
+      setRecoveryError("Password must be at least 8 characters");
+      return;
+    }
+    const mnemonic = recoveryMnemonic.join(' ').toLowerCase().trim();
+    if (mnemonic.split(' ').length !== 12) {
+       setRecoveryError("Please enter all 12 words");
+       return;
+    }
+
+    setIsSending(true);
+    try {
+      await core.resetVault(mnemonic, recoveryPassword);
+      setIsLocked(false);
+      setShowRecovery(false);
+      setRecoveryPassword('');
+      setRecoveryConfirmPassword('');
+      setRecoveryMnemonic(Array(12).fill(''));
+      // Reload wallets
+      const w = await core.listWallets();
+      if (w.length > 0) setActiveWallet(w[0]);
+    } catch (err: any) {
+      setRecoveryError(err.message || "Recovery failed. Check your mnemonic.");
+    } finally {
+      setIsSending(false);
+    }
   };
 
   const executeSend = async () => {
     if (!proposedTx || !activeWallet) return;
     setIsSending(true);
     setTxStatus('transferring');
+    setTxStatus('transferring');
     try {
-      await new Promise(r => setTimeout(r, 2500));
-      const hash = await core.signTransaction(activeWallet.id, proposedTx);
-      setTxHash(hash);
+      const result = await core.signTransaction(activeWallet.id, proposedTx);
+      setTxHash(result.signature);
       setTxStatus('success');
     } catch (err) {
       console.error("Send failed", err);
@@ -338,7 +476,6 @@ const App = () => {
       const args = contractArgs ? contractArgs.split(',').map(a => a.trim()) : [];
       const data = iface.encodeFunctionData(contractMethod, args);
       
-      await new Promise(r => setTimeout(r, 1500));
       const hash = await core.signTransaction(activeWallet.id, { to: selectedContract.address, data });
       alert(`Transaction Broadcasted!\nContract: ${selectedContract.name}\nMethod: ${contractMethod}\nHash: ${hash}`);
       setSelectedContract(null);
@@ -692,9 +829,9 @@ const App = () => {
                          {sendTab === 'nft' ? <Zap className="w-6 h-6" /> : (chains.find(c => c.id === selectedChain)?.icon || <Globe className="w-6 h-6" />)}
                       </div>
                       <div>
-                         <p className="text-2xl font-black text-white leading-none mb-1">-{proposedTx.value} {sendTab === 'nft' ? 'NFT' : (chains.find(c => c.id === selectedChain)?.name === 'Ethereum' ? 'ETH' : chains.find(c => c.id === selectedChain)?.name?.split(' ')[0])}</p>
-                         <p className="text-xs font-bold text-gray-500 leading-none">$0.00962</p>
-                      </div>
+                          <p className="text-2xl font-black text-white leading-none mb-1">-{proposedTx.value} {sendTab === 'nft' ? 'NFT' : (chains.find(c => c.id === selectedChain)?.name === 'Ethereum' ? 'ETH' : chains.find(c => c.id === selectedChain)?.name?.split(' ')[0])}</p>
+                          <p className="text-xs font-bold text-gray-500 leading-none">${(parseFloat(proposedTx.value) * (prices[selectedChain] || 0)).toFixed(2)}</p>
+                       </div>
                    </div>
                 </div>
 
@@ -717,8 +854,12 @@ const App = () => {
               <div className="mt-auto pt-8 border-t border-white/5">
                 <div className="flex justify-between items-center mb-6">
                    <p className="text-sm font-bold text-gray-400 tracking-tight">Network Fee</p>
-                   <div className="flex items-center gap-2 text-right">
+                   <div 
+                     className="flex items-center gap-2 text-right cursor-pointer group hover:bg-white/5 py-1 px-2 rounded-lg transition-all"
+                     onClick={() => setShowGasModal(true)}
+                   >
                       <span className="text-[10px] font-black text-white uppercase tracking-widest">{estimatedFee}</span>
+                      <ChevronRight className="w-3 h-3 text-gray-400 group-hover:translate-x-0.5 transition-transform" />
                    </div>
                 </div>
                 
@@ -740,6 +881,157 @@ const App = () => {
               </div>
             </motion.div>
           )}
+
+          {/* Network Fee Selector Modal */}
+          <AnimatePresence>
+            {showGasModal && (
+              <motion.div 
+                 initial={{ opacity: 0, y: 100 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 100 }}
+                 className="absolute inset-x-0 bottom-0 z-[80] bg-[#121318]/98 backdrop-blur-3xl p-8 rounded-t-[40px] border-t border-white/10 shadow-2xl"
+              >
+                 <div className="flex justify-between items-center mb-8">
+                    <h3 className="text-xl font-black text-white tracking-tight">Network Fee</h3>
+                    <X className="w-6 h-6 text-gray-400 cursor-pointer hover:text-white transition-colors" onClick={() => setShowGasModal(false)} />
+                 </div>
+
+                 <div className="space-y-3">
+                    {[
+                      { id: 'fast', name: 'Fast', icon: '🚀', tier: gasEstimates?.fast },
+                      { id: 'average', name: 'Average', icon: '🚙', tier: gasEstimates?.average },
+                      { id: 'slow', name: 'Slow', icon: '🐢', tier: gasEstimates?.slow },
+                      { id: 'custom', name: 'Custom', icon: '⚒️', tier: null }
+                    ].map((opt) => (
+                      <div 
+                        key={opt.id}
+                        onClick={() => opt.id === 'custom' ? setShowCustomGasModal(true) : handleSelectSpeed(opt.id)}
+                        className={`p-5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between group ${gasSettings.speed === opt.id ? 'bg-white/10 border-white/20 shadow-inner' : 'bg-white/5 border-white/5 hover:bg-white/8 hover:scale-[1.01]'}`}
+                        style={{ borderColor: gasSettings.speed === opt.id ? theme.primary : undefined }}
+                      >
+                         <div className="flex items-center gap-4">
+                            <span className="text-2xl drop-shadow-lg">{opt.icon}</span>
+                            <div>
+                               <p className={`text-sm font-black tracking-tight ${gasSettings.speed === opt.id ? 'text-white' : 'text-gray-400'}`}>{opt.name}</p>
+                               {opt.tier && <p className="text-[10px] font-mono text-gray-600 opacity-60">{opt.tier.maxFee} GWEI</p>}
+                            </div>
+                         </div>
+                         <div className="text-right">
+                            <p className="text-xs font-black tracking-tight" style={{ color: gasSettings.speed === opt.id ? theme.primary : '#666' }}>
+                               {opt.tier ? `<$${(parseFloat(opt.tier.maxFee) * 21000 / 1e9 * (prices[selectedChain] || 0)).toFixed(2)}` : ''}
+                            </p>
+                            {opt.tier && <p className="text-[8px] font-bold text-gray-600 uppercase tracking-widest mt-0.5 opacity-40">{(parseFloat(opt.tier.maxFee) * 21000 / 1e9).toFixed(5)} {chains.find(c => c.id === selectedChain)?.name.split(' ')[0]}</p>}
+                            {opt.id === 'custom' && <ChevronRight className="w-4 h-4 text-gray-600" />}
+                         </div>
+                      </div>
+                    ))}
+                 </div>
+              </motion.div>
+            )}
+
+            {showCustomGasModal && (
+              <motion.div 
+                 initial={{ opacity: 0, x: 380 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 380 }}
+                 className="absolute inset-0 z-[90] bg-bolt-dark/98 backdrop-blur-3xl p-8 flex flex-col"
+              >
+                 <div className="flex items-center gap-4 mb-10 overflow-hidden">
+                    <div className="w-10 h-10 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center cursor-pointer hover:bg-white/10 transition-all" onClick={() => setShowCustomGasModal(false)}>
+                       <ArrowLeft className="w-5 h-5 text-gray-400" />
+                    </div>
+                    <div>
+                       <h3 className="text-xl font-black text-white tracking-tight">Custom Gas</h3>
+                       <p className="text-[9px] font-bold text-gray-600 uppercase tracking-widest">{chains.find(c => c.id === selectedChain)?.name}</p>
+                    </div>
+                 </div>
+
+                 <div className="flex-1 space-y-8">
+                    <div className="flex justify-between items-center py-5 border-b border-white/5 group">
+                       <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest group-hover:text-gray-400 transition-colors">Current Base Fee</p>
+                       <p className="text-sm font-black text-white px-3 py-1 bg-white/5 rounded-lg border border-white/10">{gasEstimates?.baseFee || '20'} GWEI</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                       <div className="p-5 rounded-3xl bg-white/5 border border-white/5 focus-within:border-white/20 transition-all group">
+                          <div className="flex items-center gap-2 mb-2">
+                             <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Priority</p>
+                             <Zap className="w-3 h-3 text-gray-700" />
+                          </div>
+                          <div className="flex items-baseline gap-1">
+                             <input 
+                               type="number" 
+                               className="bg-transparent text-xl font-black text-white outline-none w-full tracking-tighter"
+                               value={gasSettings.priorityFee}
+                               onChange={(e) => setGasSettings({ ...gasSettings, priorityFee: e.target.value })}
+                             />
+                             <span className="text-[9px] font-bold text-gray-700">GWEI</span>
+                          </div>
+                       </div>
+                       <div className="p-5 rounded-3xl bg-white/5 border border-white/5 focus-within:border-white/20 transition-all group">
+                          <div className="flex items-center gap-2 mb-2">
+                             <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Max Fee</p>
+                             <Cpu className="w-3 h-3 text-gray-700" />
+                          </div>
+                          <div className="flex items-baseline gap-1">
+                             <input 
+                               type="number" 
+                               className="bg-transparent text-xl font-black text-white outline-none w-full tracking-tighter"
+                               value={gasSettings.maxFee}
+                               onChange={(e) => setGasSettings({ ...gasSettings, maxFee: e.target.value })}
+                             />
+                             <span className="text-[9px] font-bold text-gray-700">GWEI</span>
+                          </div>
+                       </div>
+                    </div>
+
+                    <div className="p-6 rounded-[32px] bg-white/5 border border-white/5 relative overflow-hidden group shadow-inner">
+                       <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 blur-3xl rounded-full -mr-16 -mt-16 pointer-events-none" />
+                       <div className="flex items-center gap-2 mb-3">
+                          <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Gas Limit</p>
+                          <Info className="w-3.5 h-3.5 text-gray-600 hover:text-white transition-colors cursor-help" />
+                       </div>
+                       <input 
+                         type="number" 
+                         className="bg-transparent text-3xl font-black text-white outline-none w-full tracking-tighter relative z-10"
+                         value={gasSettings.gasLimit}
+                         onChange={(e) => setGasSettings({ ...gasSettings, gasLimit: e.target.value })}
+                       />
+                       <p className="text-[10px] text-gray-600 font-bold mt-3 uppercase tracking-wider">Recommended: <span className="underline decoration-dotted transition-colors hover:text-white cursor-pointer" onClick={() => setGasSettings({...gasSettings, gasLimit: '21000'})} style={{ color: theme.primary }}>21000</span></p>
+                    </div>
+
+                    <div className="p-6 rounded-[32px] bg-gradient-to-br from-white/5 to-transparent border border-white/5 space-y-5">
+                       <div className="flex justify-between items-center">
+                          <p className="text-xs font-bold text-gray-500">Expected Total</p>
+                          <div className="text-right">
+                             <p className="text-sm font-black text-white tracking-tight italic">{"<$" + (parseFloat(gasSettings.priorityFee) * parseInt(gasSettings.gasLimit) / 1e9 * (prices[selectedChain] || 0)).toFixed(2)}</p>
+                             <p className="text-[9px] font-bold text-gray-600 uppercase tracking-widest">{(parseFloat(gasSettings.priorityFee) * parseInt(gasSettings.gasLimit) / 1e9).toFixed(5)} {chains.find(c => c.id === selectedChain)?.name.split(' ')[0]}</p>
+                          </div>
+                       </div>
+                       <div className="flex justify-between items-center text-xs">
+                          <p className="text-xs font-bold text-gray-500">Maximum possible</p>
+                          <div className="text-right">
+                             <p className="text-sm font-black text-white tracking-tight italic opacity-60">{"<$" + (parseFloat(gasSettings.maxFee) * parseInt(gasSettings.gasLimit) / 1e9 * (prices[selectedChain] || 0)).toFixed(2)}</p>
+                             <p className="text-[9px] font-bold text-gray-700 uppercase tracking-widest">{(parseFloat(gasSettings.maxFee) * parseInt(gasSettings.gasLimit) / 1e9).toFixed(5)} {chains.find(c => c.id === selectedChain)?.name.split(' ')[0]}</p>
+                          </div>
+                       </div>
+                    </div>
+                 </div>
+
+                 <div className="flex gap-4 mt-auto">
+                    <Button 
+                      onClick={() => handleSelectSpeed('average')}
+                      className="flex-1 py-5 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all font-bold text-sm"
+                    >
+                       Reset Default
+                    </Button>
+                    <Button 
+                      className="flex-[1.8] py-5 rounded-2xl font-black uppercase text-sm shadow-2xl border border-white/10"
+                      style={{ background: `linear-gradient(135deg, ${theme.primary}, ${theme.secondary})` }}
+                      onClick={() => handleSaveCustomGas(gasSettings)}
+                    >
+                       Apply Changes
+                    </Button>
+                 </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {txStatus !== 'idle' && (
             <motion.div 
@@ -821,7 +1113,7 @@ const App = () => {
                     <h2 className="text-6xl font-black text-white tracking-tighter mb-4">Done</h2>
                     <div className="flex flex-col items-center gap-4">
                        <a 
-                         href={`https://explorer.com/tx/${txHash}`} 
+                         href={`${CHAINS[selectedChain]?.explorer}/tx/${txHash}`} 
                          target="_blank" rel="noreferrer" 
                          className="px-6 py-2 rounded-full bg-white/5 border border-white/10 text-xs font-black text-blue-400 hover:bg-white/10 transition-all flex items-center gap-2 group uppercase tracking-widest"
                        >
@@ -1048,24 +1340,31 @@ const App = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-             <div className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 flex items-center gap-2 group cursor-pointer hover:bg-white/10 transition-all" onClick={() => setShowNetworks(true)}>
-                <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: theme.primary }} />
-                <span className="text-[10px] font-black uppercase text-gray-300">{chains.find(c => c.id === selectedChain)?.name}</span>
-             </div>
+              <div 
+                className={`px-4 py-2 rounded-xl border flex items-center gap-2 cursor-pointer transition-all duration-500 shadow-xl ${showHistory ? 'border-white/40 bg-white/20' : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'}`} 
+                style={{ 
+                  boxShadow: showHistory ? `0 0 20px ${theme.primary}30` : 'none',
+                  background: showHistory ? `linear-gradient(135deg, ${theme.primary}20, ${theme.secondary}20)` : undefined 
+                }}
+                onClick={() => { setShowHistory(!showHistory); setShowContracts(false); setShowNFTs(false); }}
+              >
+                 <div className="w-2 h-2 rounded-full" style={{ backgroundColor: showHistory ? theme.primary : '#444', filter: showHistory ? `drop-shadow(0 0 5px ${theme.primary})` : 'none' }} />
+                 <span className="text-[10px] font-black uppercase tracking-widest text-white/90">Activity</span>
+              </div>
              <div 
                 className={`px-3 py-1.5 rounded-lg border flex items-center gap-2 cursor-pointer transition-all ${showContracts ? 'bg-white/15 border-white/30' : 'bg-white/5 border-white/10 hover:bg-white/10'}`} 
-                onClick={() => { setShowContracts(!showContracts); setShowNFTs(false); }}
+                onClick={() => { setShowContracts(!showContracts); setShowNFTs(false); setShowHistory(false); }}
               >
                 <Cpu className="w-3 h-3" style={{ color: showContracts ? theme.primary : 'inherit' }} />
                 <span className="text-[10px] font-black uppercase text-gray-300">Contracts</span>
              </div>
-             <div 
-                className={`px-3 py-1.5 rounded-lg border flex items-center gap-2 cursor-pointer transition-all ${showNFTs ? 'bg-white/15 border-white/30' : 'bg-white/5 border-white/10 hover:bg-white/10'}`} 
-                onClick={() => { setShowNFTs(!showNFTs); setShowContracts(false); }}
+              <div 
+                 className={`px-3 py-1.5 rounded-lg border flex items-center gap-2 cursor-pointer transition-all ${showNFTs ? 'bg-white/15 border-white/30' : 'bg-white/5 border-white/10 hover:bg-white/10'}`} 
+                 onClick={() => { setShowNFTs(!showNFTs); setShowContracts(false); setShowHistory(false); }}
               >
-                <Zap className="w-3 h-3" style={{ color: showNFTs ? theme.primary : 'inherit' }} />
-                <span className="text-[10px] font-black uppercase text-gray-300">NFTs</span>
-             </div>
+                 <Zap className="w-3 h-3" style={{ color: showNFTs ? theme.primary : 'inherit' }} />
+                 <span className="text-[10px] font-black uppercase text-gray-300">NFTs</span>
+              </div>
           </div>
         </motion.div>
 
@@ -1132,6 +1431,82 @@ const App = () => {
                   </motion.div>
                 ))
               )
+            ) : showHistory ? (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col gap-4">
+                <div className="flex items-center justify-between mb-2">
+                   <div className="relative flex-1 mr-3">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                      <input 
+                        type="text" placeholder="Search History..." 
+                        className="w-full bg-white/5 border border-white/10 rounded-xl py-2 pl-10 pr-4 text-xs font-bold text-white placeholder:text-gray-600 outline-none focus:bg-white/10 transition-all"
+                        value={historySearch} onChange={(e) => setHistorySearch(e.target.value)}
+                      />
+                   </div>
+                   <button className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-gray-400 hover:text-white hover:bg-white/10 transition-all">
+                      <RefreshCw className="w-4 h-4" />
+                   </button>
+                </div>
+
+                <div className="flex items-center gap-2 mb-2 overflow-x-auto pb-2 scrollbar-hide">
+                   {['all', ...Object.keys(CHAINS)].map(chain => (
+                      <button 
+                        key={chain} 
+                        onClick={() => setHistoryFilter(chain)}
+                        className={`px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-widest border transition-all whitespace-nowrap ${historyFilter === chain ? 'border-white/20 bg-white/10 text-white' : 'border-white/5 bg-white/5 text-gray-500 hover:bg-white/10'}`}
+                        style={{ borderColor: historyFilter === chain ? theme.primary : 'rgba(255,255,255,0.05)' }}
+                      >
+                         {chain}
+                      </button>
+                   ))}
+                </div>
+
+                {history.length === 0 ? (
+                  <div className="p-10 rounded-[32px] bg-white/5 border border-dashed border-white/10 text-center flex flex-col items-center justify-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-gray-500"><History className="w-6 h-6" /></div>
+                    <p className="text-gray-500 text-xs text-center leading-relaxed font-medium">No transactions found. All activity from your vaults will appear here.</p>
+                  </div>
+                ) : (
+                  history
+                  .filter(h => historyFilter === 'all' || h.chainId === historyFilter)
+                  .filter(h => h.hash.toLowerCase().includes(historySearch.toLowerCase()) || h.to.toLowerCase().includes(historySearch.toLowerCase()))
+                  .map((h, i) => (
+                    <motion.div 
+                      key={h.hash} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
+                      className="p-4 rounded-[24px] bg-white/[0.03] backdrop-blur-md border border-white/[0.05] hover:bg-white/[0.08] hover:border-white/[0.1] transition-all flex items-center justify-between group relative overflow-hidden"
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent pointer-events-none" />
+                      <div className="flex items-center gap-4 relative z-10">
+                        <div className="w-11 h-11 rounded-2xl bg-white/[0.05] border border-white/[0.1] flex items-center justify-center shadow-inner group-hover:scale-105 transition-transform">
+                          {h.type === 'send' ? <Send className="w-5 h-5 text-red-400/80" /> : <RefreshCw className="w-5 h-5 text-green-400/80" />}
+                        </div>
+                        <div>
+                          <p className="text-sm font-black capitalize tracking-tight text-white/90">{h.type.replace('_', ' ')}</p>
+                          <div className="flex items-center gap-2">
+                             <p className="text-[10px] text-gray-500 font-mono tracking-tighter opacity-60 cursor-pointer hover:text-white transition-colors" onClick={() => copyAddress(h.to)}>
+                                {formatAddress(h.to)}
+                             </p>
+                             <a 
+                                href={`${CHAINS[h.chainId]?.explorer}/tx/${h.hash}`} 
+                                target="_blank" rel="noreferrer"
+                                className="p-1 rounded-md bg-white/5 hover:bg-white/10 transition-colors"
+                             >
+                                <ExternalLink className="w-2.5 h-2.5 text-gray-400 group-hover:text-blue-400" />
+                             </a>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right relative z-10">
+                        <p className={`text-sm font-black tracking-tighter ${h.type === 'send' ? 'text-white' : 'text-green-400'}`}>
+                          {h.type === 'send' ? '-' : '+'}{h.value} {h.asset}
+                        </p>
+                        <p className="text-[9px] font-bold text-gray-500 uppercase tracking-[0.1em] opacity-40">
+                          {new Date(h.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} · {new Date(h.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                        </p>
+                      </div>
+                    </motion.div>
+                  ))
+                )}
+              </motion.div>
             ) : (
               wallets.length === 0 ? (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-10 rounded-[32px] bg-white/5 border border-dashed border-white/10 text-center flex flex-col items-center justify-center gap-4">
@@ -1237,34 +1612,104 @@ const App = () => {
                 </motion.div>
 
                 <div className="space-y-4">
-                  <div className="space-y-2">
-                    <input 
-                      type={showPassword ? "text" : "password"}
-                      placeholder="Password"
-                      value={password}
-                      onChange={(e) => { setPassword(e.target.value); setPasswordError(''); }}
-                      onKeyDown={(e) => e.key === 'Enter' && (isVaultPrepared ? handleUnlock() : handleSetupPassword())}
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 px-8 text-sm font-bold text-white placeholder:text-gray-600 outline-none focus:bg-white/10 transition-all shadow-inner"
-                    />
-                    {!isVaultPrepared && (
-                      <input 
-                        type={showPassword ? "text" : "password"}
-                        placeholder="Confirm"
-                        value={confirmPassword}
-                        onChange={(e) => { setConfirmPassword(e.target.value); setPasswordError(''); }}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSetupPassword()}
-                        className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 px-8 text-sm font-bold text-white placeholder:text-gray-600 outline-none focus:bg-white/10 transition-all shadow-inner"
-                      />
-                    )}
-                  </div>
-                  {passwordError && <p className="text-red-500 text-[10px] font-black uppercase tracking-widest">{passwordError}</p>}
-                  <Button 
-                    onClick={isVaultPrepared ? handleUnlock : handleSetupPassword}
-                    className="w-full py-6 rounded-2xl font-black uppercase tracking-[0.2em]"
-                    style={{ background: `linear-gradient(135deg, ${theme.primary}, ${theme.secondary})` }}
-                  >
-                    {isSending ? 'Authenticating...' : (isVaultPrepared ? 'Unlock' : 'Begin Setup')}
-                  </Button>
+                  {!showRecovery ? (
+                    <>
+                      <div className="space-y-2">
+                        <input 
+                          type={showPassword ? "text" : "password"}
+                          placeholder="Password"
+                          value={password}
+                          onChange={(e) => { setPassword(e.target.value); setPasswordError(''); }}
+                          onKeyDown={(e) => e.key === 'Enter' && (isVaultPrepared ? handleUnlock() : handleSetupPassword())}
+                          className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 px-8 text-sm font-bold text-white placeholder:text-gray-600 outline-none focus:bg-white/10 transition-all shadow-inner"
+                        />
+                        {!isVaultPrepared && (
+                          <input 
+                            type={showPassword ? "text" : "password"}
+                            placeholder="Confirm"
+                            value={confirmPassword}
+                            onChange={(e) => { setConfirmPassword(e.target.value); setPasswordError(''); }}
+                            onKeyDown={(e) => e.key === 'Enter' && handleSetupPassword()}
+                            className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 px-8 text-sm font-bold text-white placeholder:text-gray-600 outline-none focus:bg-white/10 transition-all shadow-inner"
+                          />
+                        )}
+                      </div>
+                      {passwordError && <p className="text-red-500 text-[10px] font-black uppercase tracking-widest">{passwordError}</p>}
+                      <Button 
+                        onClick={isVaultPrepared ? handleUnlock : handleSetupPassword}
+                        className="w-full py-6 rounded-2xl font-black uppercase tracking-[0.2em]"
+                        style={{ background: `linear-gradient(135deg, ${theme.primary}, ${theme.secondary})` }}
+                      >
+                        {isSending ? 'Authenticating...' : (isVaultPrepared ? 'Unlock' : 'Begin Setup')}
+                      </Button>
+                      
+                      {isVaultPrepared && (
+                        <button 
+                          onClick={() => setShowRecovery(true)}
+                          className="w-full py-2 text-[10px] font-black uppercase text-gray-500 hover:text-white transition-colors tracking-widest mt-2"
+                        >
+                          Forgot Password? Use Recovery Phrase
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <div className="space-y-6">
+                       <div className="grid grid-cols-3 gap-2">
+                          {recoveryMnemonic.map((word, i) => (
+                             <div key={i} className="relative group">
+                                <span className="absolute left-2 top-1.5 text-[8px] font-black text-gray-600 uppercase group-focus-within:text-white/50">{i + 1}</span>
+                                <input 
+                                   type="text"
+                                   className="w-full bg-white/5 border border-white/5 rounded-xl pt-4 pb-2 px-2 text-[10px] font-bold text-white outline-none focus:bg-white/10 focus:border-white/20 transition-all text-center"
+                                   value={word}
+                                   onChange={(e) => {
+                                      const newMnemonic = [...recoveryMnemonic];
+                                      newMnemonic[i] = e.target.value.toLowerCase();
+                                      setRecoveryMnemonic(newMnemonic);
+                                      setRecoveryError('');
+                                   }}
+                                />
+                             </div>
+                          ))}
+                       </div>
+                       
+                       <div className="space-y-2">
+                          <input 
+                            type="password"
+                            placeholder="New Master Password"
+                            value={recoveryPassword}
+                            onChange={(e) => setRecoveryPassword(e.target.value)}
+                            className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-8 text-xs font-bold text-white placeholder:text-gray-500 outline-none focus:bg-white/10 transition-all"
+                          />
+                          <input 
+                            type="password"
+                            placeholder="Confirm New Password"
+                            value={recoveryConfirmPassword}
+                            onChange={(e) => setRecoveryConfirmPassword(e.target.value)}
+                            className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-8 text-xs font-bold text-white placeholder:text-gray-500 outline-none focus:bg-white/10 transition-all"
+                          />
+                       </div>
+
+                       {recoveryError && <p className="text-red-500 text-[10px] font-black uppercase tracking-widest leading-relaxed">{recoveryError}</p>}
+
+                       <div className="space-y-3">
+                          <Button 
+                            onClick={handleRecovery}
+                            disabled={isSending}
+                            className="w-full py-5 rounded-2xl font-black uppercase tracking-[0.2em] shadow-2xl"
+                            style={{ background: `linear-gradient(135deg, ${theme.primary}, ${theme.secondary})` }}
+                          >
+                            {isSending ? 'Recovering...' : 'Reset & Restore'}
+                          </Button>
+                          <button 
+                            onClick={() => setShowRecovery(false)}
+                            className="w-full text-[10px] font-black uppercase text-gray-500 hover:text-white transition-all tracking-widest py-2"
+                          >
+                            Back to Login
+                          </button>
+                       </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>

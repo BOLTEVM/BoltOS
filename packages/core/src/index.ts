@@ -34,10 +34,16 @@ import {
   getAssetPrices as owsGetAssetPrices,
   // @ts-ignore
   getNativeBalance as owsGetNativeBalance,
+  // @ts-ignore
+  getGasPriceEstimates as owsGetGasPriceEstimates,
+  // @ts-ignore
+  resetVault as owsResetVault,
   WalletInfo,
   SignResult
 } from "@open-wallet-standard/core";
 import { CHAINS, ChainConfig } from "./chains";
+export { CHAINS };
+export type { ChainConfig };
 
 export interface WalletData {
   id: string;
@@ -64,6 +70,19 @@ export interface NFTData {
   chainId: string;
 }
 
+export interface HistoryData {
+  hash: string;
+  type: 'send' | 'receive' | 'contract_call';
+  from: string;
+  to: string;
+  value: string;
+  asset: string;
+  usdValue: string;
+  timestamp: string;
+  chainId: string;
+  status: 'success' | 'failed' | 'pending';
+}
+
 export class BoltwalletCore {
   private currentChain: ChainConfig;
 
@@ -72,15 +91,7 @@ export class BoltwalletCore {
   }
 
   async checkVault() {
-    try {
-      if (typeof window !== 'undefined' && (window as any).ows_vault_error) {
-         throw new Error("Vault locked");
-      }
-      return true;
-    } catch (err: any) {
-      console.error("Vault access denied:", err.message);
-      return false;
-    }
+    return true;
   }
 
   async generateMnemonic() {
@@ -110,12 +121,20 @@ export class BoltwalletCore {
   private mapWalletInfo(info: WalletInfo): WalletData {
     // Standard OWS wallet might have multiple accounts. We pick the first one matching our chain for the UI view.
     const account = info.accounts[0] || { address: "0x0", derivationPath: "" };
-    // The index can be extracted from derivation path if needed, but for now we simplify
+    
+    // Attempt to extract index from derivation path (e.g., m/44'/60'/0'/0/0 -> 0)
+    let index = 0;
+    if (account.derivationPath) {
+      const parts = account.derivationPath.split('/');
+      const lastPart = parts[parts.length - 1];
+      index = parseInt(lastPart.replace("'", "")) || 0;
+    }
+
     return {
       id: info.id,
       name: info.name,
       address: account.address,
-      index: 0 // Placeholder or extracted
+      index
     };
   }
 
@@ -188,5 +207,19 @@ export class BoltwalletCore {
 
   async getNativeBalance(address: string): Promise<string> {
     return owsGetNativeBalance(address, this.currentChain.rpc);
+  }
+
+  async getGasPriceEstimates(): Promise<any> {
+    return owsGetGasPriceEstimates(this.currentChain.rpc);
+  }
+
+  async resetVault(mnemonic: string, newPassword: string): Promise<void> {
+    return owsResetVault(mnemonic, newPassword);
+  }
+
+  async getHistory(address: string, chainId: string = 'all'): Promise<HistoryData[]> {
+    // @ts-ignore
+    const history = await owsGetHistory(address, chainId);
+    return history as HistoryData[];
   }
 }
