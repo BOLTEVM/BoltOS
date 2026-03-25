@@ -98,6 +98,7 @@ const App = () => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [showMnemonicPlain, setShowMnemonicPlain] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [proposedTx, setProposedTx] = useState<any>(null);
   const [prices, setPrices] = useState<Record<string, number>>({});
@@ -633,11 +634,9 @@ const App = () => {
              <Settings 
                 className={`w-5 h-5 cursor-pointer transition-colors ${showSettings ? 'text-bolt-blue' : 'text-gray-400 hover:text-white'}`} 
                 onClick={async () => {
-                   if (!showSettings) {
-                      const mnemon = await core.getSession();
-                      setMnemonic(mnemon || '');
-                   } else {
+                   if (showSettings) {
                       setMnemonic('');
+                      setShowMnemonicPlain(false);
                    }
                    setShowSettings(!showSettings);
                 }}
@@ -690,9 +689,24 @@ const App = () => {
               </div>
               <div className="flex-1 space-y-8">
                 <div>
-                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-4">Security Phrase</p>
-                  <div className="p-5 rounded-3xl bg-white/5 border border-white/10 select-all font-mono text-xs leading-relaxed text-center" style={{ color: theme.primary }}>
-                    {mnemonic}
+                  <div className="flex justify-between items-center mb-4">
+                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Security Phrase</p>
+                    <button 
+                      onClick={async () => {
+                        if (!showMnemonicPlain && !mnemonic) {
+                          const mnemon = await core.getSession();
+                          setMnemonic(mnemon || '');
+                        }
+                        setShowMnemonicPlain(!showMnemonicPlain);
+                      }}
+                      className="flex items-center gap-2 p-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all group"
+                    >
+                      {showMnemonicPlain ? <EyeOff className="w-3.5 h-3.5 text-gray-400 group-hover:text-white" /> : <Eye className="w-3.5 h-3.5 text-gray-400 group-hover:text-white" />}
+                      <span className="text-[9px] font-black text-gray-500 group-hover:text-white uppercase tracking-widest">{showMnemonicPlain ? 'Hide' : 'Reveal'}</span>
+                    </button>
+                  </div>
+                  <div className={`p-6 rounded-3xl bg-white/5 border border-white/10 font-mono text-xs leading-relaxed text-center transition-all duration-300 ${!showMnemonicPlain ? 'blur-md select-none' : 'select-all'}`} style={{ color: theme.primary }}>
+                    {showMnemonicPlain ? mnemonic : '•••• •••• •••• •••• •••• •••• •••• •••• •••• •••• •••• ••••'}
                   </div>
                 </div>
                 <div className="pt-8 border-t border-white/5">
