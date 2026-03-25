@@ -1,4 +1,4 @@
-import { ethers } from 'ethers';
+import { ethers, wordlists } from 'ethers';
 
 const VAULT_KEY = 'bolt_vault_v1';
 let activeChainId = 'ethereum';
@@ -280,7 +280,7 @@ export const deriveAddress = (mnemonic: string, index: number): string => {
   const fullPath = basePath.endsWith('/') ? `${basePath}${index}` : `${basePath}/${index}`;
   
   try {
-    const wallet = ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, fullPath);
+    const wallet = ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, fullPath, wordlists.en);
     return wallet.address;
   } catch (e) {
     console.error("Address Derivation Error:", e);
@@ -490,7 +490,7 @@ export const generateMnemonic = async (): Promise<string> => {
 export const resetVault = async (mnemonic: string, newPassword: string): Promise<void> => {
   // Validate mnemonic
   try {
-    ethers.HDNodeWallet.fromPhrase(mnemonic);
+    ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, undefined, wordlists.en);
   } catch (e) {
     throw new Error("Invalid mnemonic phrase. Please check the 12 words.");
   }
@@ -547,23 +547,32 @@ export const getNativeBalance = async (address: string, rpcUrl: string): Promise
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const balance = await provider.getBalance(address);
     return ethers.formatEther(balance);
-  } catch (err) {
-    console.warn("Balance Fetch Error, using deterministic mock:", err);
-    // Deterministic mock based on address for development consistency
-    const hash = ethers.id(address);
-    const mockVal = (parseInt(hash.substring(2, 6), 16) % 2000) / 1000;
-    return mockVal.toFixed(4);
+  } catch (err: any) {
+    // BOLT-06: RPC Error Sanitization
+    const errorMsg = err.message || "Unknown RPC Error";
+    console.error(`Balance Fetch Error [${address}]:`, errorMsg);
+    
+    // Check for specific RPC failure codes or messages that cause "coalesce" errors
+    if (errorMsg.includes("could not coalesce") || errorMsg.includes("-32014")) {
+       return "0.00"; 
+    }
+    
+    throw err;
   }
 };
 
-export const getContractBalance = async (contractAddress: string, walletAddress: string, decimals: number): Promise<string> => {
-   // Simulated balance fetching logic for the extension/web views
-   await new Promise(r => setTimeout(r, 500));
-   const mockBalances: Record<string, string> = {
-      "0x1234567890123456789012345678901234567890": "1000.50",
-      "default": (Math.random() * 500).toFixed(decimals > 2 ? 2 : decimals)
-   };
-   return mockBalances[contractAddress] || mockBalances["default"];
+export const getContractBalance = async (contractAddress: string, walletAddress: string, decimals: number, rpcUrl: string): Promise<string> => {
+   try {
+     const provider = new ethers.JsonRpcProvider(rpcUrl);
+     const abi = ["function balanceOf(address) view returns (uint256)"];
+     const contract = new ethers.Contract(contractAddress, abi, provider);
+     const balance = await contract.balanceOf(walletAddress);
+     return ethers.formatUnits(balance, decimals);
+   } catch (err: any) {
+     const errorMsg = err.message || "Unknown Contract RPC Error";
+     console.error(`Contract Balance Fetch Error [${contractAddress}]:`, errorMsg);
+     return "0.00";
+   }
 };
 
 export const importNFT = async (address: string, tokenId: string, name: string, chainId: string) => {

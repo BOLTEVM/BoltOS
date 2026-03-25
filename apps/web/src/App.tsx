@@ -208,7 +208,7 @@ const App = () => {
         setTotalUSD(total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 
         if (activeWallet) {
-          const hist = await core.getHistory(activeWallet.id, 'all');
+          const hist = await core.getHistory(activeWallet.address, 'all');
           setHistory(hist);
         }
       } catch (err) {

@@ -166,7 +166,7 @@ export class BoltwalletCore {
   }
 
   async getContractBalance(contractAddress: string, walletAddress: string, decimals: number): Promise<string> {
-    return owsGetContractBalance(contractAddress, walletAddress, decimals);
+    return owsGetContractBalance(contractAddress, walletAddress, decimals, this.currentChain.rpc);
   }
 
   async importNFT(address: string, tokenId: string, name: string): Promise<NFTData> {
