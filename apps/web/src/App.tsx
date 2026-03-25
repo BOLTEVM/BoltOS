@@ -328,7 +328,7 @@ const App = () => {
     return (
       <div 
         style={themeStyles}
-        className="w-[380px] min-h-[600px] bg-bolt-dark text-white overflow-hidden flex flex-col p-6 font-sans selection:bg-bolt-blue/30 relative"
+        className="w-full max-w-[420px] h-[600px] sm:h-auto bg-bolt-dark text-white overflow-hidden flex flex-col p-4 xs:p-6 font-sans selection:bg-bolt-blue/30 relative mx-auto shadow-2xl"
       >
         {/* Security Overlay */}
         <AnimatePresence mode="wait">
@@ -497,7 +497,7 @@ const App = () => {
 
           {showSend && activeWallet && (
             <motion.div 
-              initial={{ opacity: 0, x: 380 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 380 }}
+              initial={{ opacity: 0, x: '100%' }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: '100%' }}
               className="absolute inset-0 z-[60] bg-bolt-dark/95 text-white backdrop-blur-3xl flex flex-col font-sans"
             >
               <div className="p-6 flex flex-col h-full">
@@ -538,7 +538,7 @@ const App = () => {
                 </div>
 
                 {/* Form Sections with Glassmorphism */}
-                <div className="space-y-4 flex-1">
+                <div className="space-y-4 flex-1 overflow-y-auto scrollbar-hide pr-1 pb-4">
                   {/* Recipient Input Card */}
                   <div className="p-5 rounded-[28px] bg-white/5 border border-white/5 focus-within:bg-white/10 focus-within:border-white/10 transition-all flex flex-col gap-2 group shadow-xl">
                     <div className="flex items-center justify-between">
@@ -614,19 +614,19 @@ const App = () => {
 
           {showConfirmSend && proposedTx && (
             <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="absolute inset-0 z-[70] bg-bolt-dark/98 backdrop-blur-3xl p-8 flex flex-col rounded-t-[40px] border-t border-white/10"
+               initial={{ opacity: 0, y: '100%' }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: '100%' }}
+               className="absolute inset-x-0 bottom-0 top-[6%] z-[70] bg-bolt-dark/98 backdrop-blur-3xl p-4 xs:p-8 flex flex-col rounded-t-[40px] border-t border-white/10 shadow-[0_-20px_50px_rgba(0,0,0,0.5)]"
             >
-              <div className="flex flex-col items-center mb-8">
-                <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center mb-3 shadow-2xl relative overflow-hidden group">
+              <div className="flex flex-col items-center mb-6">
+                <div className="w-10 h-10 rounded-2xl bg-white/5 flex items-center justify-center mb-2 shadow-2xl relative overflow-hidden group">
                    <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent transition-transform group-hover:scale-110" />
-                   <div className="w-8 h-8 rounded-lg bg-orange-500/20 flex items-center justify-center text-orange-500 font-black text-xs relative z-10">🦊</div>
+                   <div className="w-6 h-6 rounded-lg bg-orange-500/20 flex items-center justify-center text-orange-500 font-black text-[10px] relative z-10">🦊</div>
                 </div>
-                <h3 className="text-xl font-black text-white tracking-tight">Send</h3>
-                <p className="text-[10px] font-mono text-gray-500 uppercase mt-1 opacity-60">{formatAddress(activeWallet?.address || '0x00...00')}</p>
+                <h3 className="text-lg font-black text-white tracking-tight">Confirm Send</h3>
+                <p className="text-[9px] font-mono text-gray-500 uppercase mt-0.5 opacity-60">{formatAddress(activeWallet?.address || '0x00...00')}</p>
               </div>
 
-              <div className="flex-1 space-y-4">
+               <div className="flex-1 space-y-4 overflow-y-auto scrollbar-hide pb-4">
                 {/* Recipient info card */}
                 <div className="p-4 rounded-3xl bg-white/5 border border-white/5 flex items-center gap-4 group hover:bg-white/10 transition-all">
                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center overflow-hidden">
@@ -700,8 +700,8 @@ const App = () => {
 
           {txStatus !== 'idle' && (
             <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 z-[80] bg-[#0A0B0E]/98 backdrop-blur-[40px] flex flex-col items-center justify-center p-8 text-center overflow-hidden"
+               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+               className="absolute inset-0 z-[80] bg-[#0A0B0E]/98 backdrop-blur-[60px] flex flex-col items-center justify-center p-8 text-center overflow-hidden"
             >
               {/* Animated Background Glows */}
               <div className="absolute inset-0 overflow-hidden pointer-events-none">

@@ -22,10 +22,17 @@ body {
 }
 
 .is-popup body, .is-popup html {
-  width: 380px;
-  height: 600px;
+  width: 100%;
+  max-width: 420px;
+  height: auto;
   min-height: 600px;
   overflow-x: hidden;
+}
+
+@media (min-width: 420px) {
+  .is-popup body, .is-popup html {
+    width: 380px;
+  }
 }
 
 @layer components {
