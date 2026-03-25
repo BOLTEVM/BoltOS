@@ -548,37 +548,44 @@ export const deleteContract = async (address: string, chainId: string) => {
 
 export const getNativeBalance = async (address: string, rpcUrl: string): Promise<string> => {
   try {
-    // BOLT-07: Bitcoin Fetcher (Esplora REST or Ankr RPC)
-    if (rpcUrl.includes('bitcoin') || rpcUrl.includes('btc')) {
+    // BOLT-07: Bitcoin Fetcher (Specific to Bitcoin chains)
+    // We check for 'bitcoin' or 'ankr.com/btc' or legacy Esplora URLs
+    // We explicitly EXCLUDE 'bittorrentchain' (BTTC) which contains 'btc' but is EVM
+    if ((rpcUrl.includes('bitcoin') || rpcUrl.includes('btc') || rpcUrl.includes('blockstream') || rpcUrl.includes('esplora')) && !rpcUrl.includes('bittorrent')) {
        const apiKey = (import.meta as any).env?.VITE_BOLT_API_KEY || "";
        
-       // Case A: Ankr Bitcoin RPC
-       if (rpcUrl.includes('ankr.com')) {
-          const base = rpcUrl.endsWith('/') ? rpcUrl.slice(0, -1) : rpcUrl;
+       // Case A: Ankr Bitcoin RPC (Premium Query API)
+       // We force Ankr if an API key is available, even if a legacy Esplora URL was passed.
+       if (rpcUrl.includes('ankr.com') || (apiKey && (rpcUrl.includes('blockstream.info') || rpcUrl.includes('esplora')))) {
+          const base = "https://rpc.ankr.com/btc";
           const finalUrl = apiKey ? `${base}/${apiKey}` : base;
           
-          const response = await fetch(finalUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              jsonrpc: '2.0',
-              id: 1,
-              method: 'ankr_getAccountBalance',
-              params: {
-                walletAddress: address,
-                blockchain: ['btc']
-              }
-            })
-          });
-          
-          if (response.ok) {
-             const data = await response.json();
-             const btcAsset = data.result?.assets?.find((a: any) => a.blockchain === 'btc');
-             if (btcAsset) return btcAsset.balance;
+          try {
+            const response = await fetch(finalUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: 1,
+                method: 'ankr_getAccountBalance',
+                params: {
+                  walletAddress: address,
+                  blockchain: ['btc']
+                }
+              })
+            });
+            
+            if (response.ok) {
+               const data = await response.json();
+               const btcAsset = data.result?.assets?.find((a: any) => a.blockchain === 'btc');
+               if (btcAsset) return btcAsset.balance;
+            }
+          } catch (e) {
+            console.warn("Ankr Bitcoin fetch failed, falling back to legacy REST if available...");
           }
        }
 
-       // Case B: Esplora REST Fallback
+       // Case B: Esplora REST Fallback (Only if Ankr didn't override or succeed)
        if (rpcUrl.includes('blockstream.info') || rpcUrl.includes('esplora')) {
           const response = await fetch(`${rpcUrl}address/${address}`, {
             headers: apiKey ? { 'x-api-key': apiKey } : {}
@@ -593,18 +600,26 @@ export const getNativeBalance = async (address: string, rpcUrl: string): Promise
     const apiKey = (import.meta as any).env?.VITE_BOLT_API_KEY || "";
     let finalRpcUrl = rpcUrl;
     
-    // BOLT-08: Tailored Ankr Premium Support
-    // Ankr prefers keys in the URL: https://rpc.ankr.com/eth/<api_key>
-    if (apiKey && rpcUrl.includes('rpc.ankr.com')) {
-       // Ensure we don't double-append if the URL already has a key or ends in a slash
-       const base = rpcUrl.endsWith('/') ? rpcUrl.slice(0, -1) : rpcUrl;
-       finalRpcUrl = `${base}/${apiKey}`;
+    // BOLT-08: Tailored Ankr Premium Support & Override
+    // We prioritize Ankr if an API key is available, especially if the current RPC is failing or legacy
+    if (apiKey) {
+       if (rpcUrl.includes('rpc.ankr.com')) {
+          const base = rpcUrl.endsWith('/') ? rpcUrl.slice(0, -1) : rpcUrl;
+          finalRpcUrl = `${base}/${apiKey}`;
+       } else if (rpcUrl.includes('llamarpc.com') || rpcUrl.includes('polygon-rpc.com') || rpcUrl.includes('monad.xyz') || rpcUrl.includes('sui.io')) {
+          // AUTO-OVERRIDE: If we have an Ankr key and the current RPC is a known standard one, switch to Ankr for performance
+          if (rpcUrl.includes('eth')) finalRpcUrl = `https://rpc.ankr.com/eth/${apiKey}`;
+          else if (rpcUrl.includes('polygon')) finalRpcUrl = `https://rpc.ankr.com/polygon/${apiKey}`;
+          else if (rpcUrl.includes('bsc')) finalRpcUrl = `https://rpc.ankr.com/bsc/${apiKey}`;
+          else if (rpcUrl.includes('monad')) finalRpcUrl = `https://rpc.ankr.com/monad/${apiKey}`;
+          else if (rpcUrl.includes('sui')) finalRpcUrl = `https://rpc.ankr.com/sui/${apiKey}`;
+       }
     }
 
     const fetchReq = new ethers.FetchRequest(finalRpcUrl);
     
-    // Only use header for non-Ankr sources that might support it (like custom Blockstream/Esplora)
-    if (apiKey && !rpcUrl.includes('rpc.ankr.com')) {
+    // Only use header for non-Ankr sources that might support it
+    if (apiKey && !finalRpcUrl.includes('rpc.ankr.com')) {
       fetchReq.setHeader("x-api-key", apiKey);
     }
 
@@ -633,13 +648,18 @@ export const getContractBalance = async (contractAddress: string, walletAddress:
      const apiKey = (import.meta as any).env?.VITE_BOLT_API_KEY || "";
      let finalRpcUrl = rpcUrl;
      
-     if (apiKey && rpcUrl.includes('rpc.ankr.com')) {
-        const base = rpcUrl.endsWith('/') ? rpcUrl.slice(0, -1) : rpcUrl;
-        finalRpcUrl = `${base}/${apiKey}`;
+     if (apiKey) {
+        if (rpcUrl.includes('rpc.ankr.com')) {
+           const base = rpcUrl.endsWith('/') ? rpcUrl.slice(0, -1) : rpcUrl;
+           finalRpcUrl = `${base}/${apiKey}`;
+        } else if (rpcUrl.includes('llamarpc.com') || rpcUrl.includes('polygon-rpc.com')) {
+           if (rpcUrl.includes('eth')) finalRpcUrl = `https://rpc.ankr.com/eth/${apiKey}`;
+           else if (rpcUrl.includes('polygon')) finalRpcUrl = `https://rpc.ankr.com/polygon/${apiKey}`;
+        }
      }
 
      const fetchReq = new ethers.FetchRequest(finalRpcUrl);
-     if (apiKey && !rpcUrl.includes('rpc.ankr.com')) {
+     if (apiKey && !finalRpcUrl.includes('rpc.ankr.com')) {
        fetchReq.setHeader("x-api-key", apiKey);
      }
      const provider = new ethers.JsonRpcProvider(fetchReq, undefined, {
