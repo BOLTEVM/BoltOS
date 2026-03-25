@@ -91,7 +91,7 @@ const deriveKey = async (password: string, salt: Uint8Array) => {
     { 
       name: 'PBKDF2', 
       salt: salt as any, 
-      iterations: 100000, 
+      iterations: 600000, 
       hash: 'SHA-256' 
     },
     passwordKey,
@@ -179,13 +179,7 @@ const getVault = async (): Promise<VaultData> => {
         if (result[VAULT_KEY]) {
           resolve(result[VAULT_KEY]);
         } else {
-          // Fallback to localStorage within extension if needed (or initialize)
-          const data = localStorage.getItem(VAULT_KEY);
-          if (data) {
-            resolve(JSON.parse(data));
-          } else {
-            resolve(initializeVault());
-          }
+          resolve(initializeVault());
         }
       });
     });
@@ -248,10 +242,11 @@ export const isVaultSetup = async () => {
 };
 
 const saveVault = async (data: VaultData) => {
-  localStorage.setItem(VAULT_KEY, JSON.stringify(data));
   if (typeof window !== 'undefined' && (window as any).chrome?.storage?.local) {
     await (window as any).chrome.storage.local.set({ [VAULT_KEY]: data });
+    return;
   }
+  localStorage.setItem(VAULT_KEY, JSON.stringify(data));
 };
 
 export const setActiveChain = (chainId: string) => {

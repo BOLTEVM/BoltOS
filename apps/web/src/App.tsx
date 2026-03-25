@@ -160,8 +160,6 @@ const App = () => {
                setIsLocked(false);
                const loadedWallets = await core.getWallets();
                setWallets(loadedWallets);
-               const mnemon = await core.getSession();
-               setMnemonic(mnemon || '');
             }
          });
       }
@@ -284,8 +282,6 @@ const App = () => {
       setIsLocked(false);
       const loadedWallets = await core.getWallets();
       setWallets(loadedWallets);
-      const mnemon = await core.getSession();
-      setMnemonic(mnemon || '');
       setPassword('');
 
       // Broadcast session to background
@@ -636,7 +632,15 @@ const App = () => {
             </div>
              <Settings 
                 className={`w-5 h-5 cursor-pointer transition-colors ${showSettings ? 'text-bolt-blue' : 'text-gray-400 hover:text-white'}`} 
-                onClick={() => setShowSettings(!showSettings)}
+                onClick={async () => {
+                   if (!showSettings) {
+                      const mnemon = await core.getSession();
+                      setMnemonic(mnemon || '');
+                   } else {
+                      setMnemonic('');
+                   }
+                   setShowSettings(!showSettings);
+                }}
                 style={{ color: showSettings ? theme.primary : undefined }}
              />
              <X className="w-5 h-5 text-gray-400 hover:text-white cursor-pointer transition-colors" />
