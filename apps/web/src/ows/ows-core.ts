@@ -555,7 +555,10 @@ export const getNativeBalance = async (address: string, rpcUrl: string): Promise
   try {
     // BOLT-07: Bitcoin REST Fetcher (Esplora API)
     if (rpcUrl.includes('blockstream.info') || rpcUrl.includes('esplora')) {
-       const response = await fetch(`${rpcUrl}address/${address}`);
+       const apiKey = (import.meta as any).env?.VITE_BOLT_API_KEY || "";
+       const response = await fetch(`${rpcUrl}address/${address}`, {
+         headers: apiKey ? { 'x-api-key': apiKey } : {}
+       });
        if (!response.ok) throw new Error(`Esplora API returned ${response.status}`);
        const data = await response.json();
        // Esplora returns satoshis in funded_txo_sum - spent_txo_sum
@@ -563,7 +566,15 @@ export const getNativeBalance = async (address: string, rpcUrl: string): Promise
        return (sats / 1e8).toFixed(8);
     }
 
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const apiKey = (import.meta as any).env?.VITE_BOLT_API_KEY || "";
+    const fetchReq = new ethers.FetchRequest(rpcUrl);
+    if (apiKey) {
+      fetchReq.setHeader("x-api-key", apiKey);
+    }
+    const provider = new ethers.JsonRpcProvider(fetchReq, undefined, {
+       staticNetwork: true,
+       batchMaxCount: 1
+    });
     const balance = await provider.getBalance(address);
     return ethers.formatEther(balance);
   } catch (err: any) {
@@ -582,7 +593,15 @@ export const getNativeBalance = async (address: string, rpcUrl: string): Promise
 
 export const getContractBalance = async (contractAddress: string, walletAddress: string, decimals: number, rpcUrl: string): Promise<string> => {
    try {
-     const provider = new ethers.JsonRpcProvider(rpcUrl);
+     const apiKey = (import.meta as any).env?.VITE_BOLT_API_KEY || "";
+     const fetchReq = new ethers.FetchRequest(rpcUrl);
+     if (apiKey) {
+       fetchReq.setHeader("x-api-key", apiKey);
+     }
+     const provider = new ethers.JsonRpcProvider(fetchReq, undefined, {
+        staticNetwork: true,
+        batchMaxCount: 1
+     });
      const abi = ["function balanceOf(address) view returns (uint256)"];
      const contract = new ethers.Contract(contractAddress, abi, provider);
      const balance = await contract.balanceOf(walletAddress);
