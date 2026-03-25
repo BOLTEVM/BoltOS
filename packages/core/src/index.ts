@@ -6,6 +6,30 @@ import {
   generateMnemonic as owsGenerateMnemonic,
   // @ts-ignore
   setActiveChain as owsSetActiveChain,
+  // @ts-ignore
+  importContract as owsImportContract,
+  // @ts-ignore
+  listContracts as owsListContracts,
+  // @ts-ignore
+  deleteContract as owsDeleteContract,
+  // @ts-ignore
+  getContractBalance as owsGetContractBalance,
+  // @ts-ignore
+  importNFT as owsImportNFT,
+  // @ts-ignore
+  listNFTs as owsListNFTs,
+  // @ts-ignore
+  deleteNFT as owsDeleteNFT,
+  // @ts-ignore
+  getNFTMetadata as owsGetNFTMetadata,
+  // @ts-ignore
+  isVaultSetup as owsIsVaultSetup,
+  // @ts-ignore
+  setupVault as owsSetupVault,
+  // @ts-ignore
+  unlockVault as owsUnlockVault,
+  // @ts-ignore
+  isVaultLocked as owsIsVaultLocked,
   WalletInfo,
   SignResult
 } from "@open-wallet-standard/core";
@@ -16,6 +40,24 @@ export interface WalletData {
   name: string;
   address: string;
   index: number;
+}
+
+export interface ContractData {
+  address: string;
+  abi: string;
+  name: string;
+  decimals: number;
+  chainId: string;
+}
+
+export interface NFTData {
+  address: string;
+  tokenId: string;
+  name: string;
+  symbol: string;
+  tokenUri: string;
+  metadata?: any;
+  chainId: string;
 }
 
 export class BoltwalletCore {
@@ -86,5 +128,53 @@ export class BoltwalletCore {
 
   getSupportedChains() {
     return Object.keys(CHAINS);
+  }
+
+  async importContract(name: string, address: string, abi: string, decimals: number): Promise<ContractData> {
+    return owsImportContract(name, address, abi, decimals, this.currentChain.id);
+  }
+
+  async listContracts(): Promise<ContractData[]> {
+    return owsListContracts(this.currentChain.id);
+  }
+
+  async deleteContract(address: string): Promise<void> {
+    return owsDeleteContract(address, this.currentChain.id);
+  }
+
+  async getContractBalance(contractAddress: string, walletAddress: string, decimals: number): Promise<string> {
+    return owsGetContractBalance(contractAddress, walletAddress, decimals);
+  }
+
+  async importNFT(address: string, tokenId: string, name: string): Promise<NFTData> {
+    return owsImportNFT(address, tokenId, name, this.currentChain.id);
+  }
+
+  async listNFTs(): Promise<NFTData[]> {
+    return owsListNFTs(this.currentChain.id);
+  }
+
+  async deleteNFT(address: string, tokenId: string): Promise<void> {
+    return owsDeleteNFT(address, tokenId, this.currentChain.id);
+  }
+
+  async getNFTMetadata(address: string, tokenId: string): Promise<any> {
+    return owsGetNFTMetadata(address, tokenId, this.currentChain.id);
+  }
+
+  async isVaultSetup(): Promise<boolean> {
+    return owsIsVaultSetup();
+  }
+
+  async setupVault(password: string): Promise<string> {
+    return owsSetupVault(password);
+  }
+
+  async unlockVault(password: string): Promise<boolean> {
+    return owsUnlockVault(password);
+  }
+
+  isVaultLocked(): boolean {
+    return owsIsVaultLocked();
   }
 }
