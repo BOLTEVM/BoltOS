@@ -14,9 +14,13 @@
       }
       
       return new Promise((resolve, reject) => {
-        const id = Math.random().toString(36).substring(7);
+        const randStr = Math.random().toString(36);
+        const id = randStr.substring(randStr.length - 7);
         
         const listener = (event: any) => {
+          // BOLT-SECURITY: Validate response source and ID
+          if (event.source !== window) return;
+          
           if (event.data?.source === 'bolt-provider' && event.data?.id === id) {
              window.removeEventListener('message', listener);
              if (event.data.error) reject(event.data.error);
@@ -25,23 +29,29 @@
         };
         
         window.addEventListener('message', listener);
+        
+        // Use a more restricted postMessage to target only this window
         window.postMessage({ 
           source: 'bolt-provider', 
           id,
           payload: args 
-        }, '*');
+        }, window.location.origin);
       });
     },
     on: (eventName: string, handler: Function) => {
-       console.log('Boltwallet: Subscribed to', eventName);
+       // Standard EventEmitter-like interface for dApps
     },
     removeListener: (eventName: string, handler: Function) => {
-       console.log('Boltwallet: Unsubscribed from', eventName);
+       // Standard cleanup for dApps
     },
     version: '1.0.0'
   };
 
-  (window as any).ows = provider;
-  // Shim for ethers/web3 detection
-  (window as any).ethereum = provider; 
+  try {
+    Object.freeze(provider); // Prevent dApps from modifying the provider object
+    (window as any).ows = provider;
+    (window as any).ethereum = provider; 
+  } catch (e) {
+    console.error('Boltwallet: Provider initialization failed', e);
+  }
 })();

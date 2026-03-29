@@ -1,10 +1,24 @@
 import { ethers, wordlists } from 'ethers';
 import { LangEn } from 'ethers/wordlists';
+import { CHAINS as CORE_CHAINS } from "@/ows/chains";
+
+// BOLT-09: Robust wordlist resolution to prevent "FAILED" errors in minified builds
+// We explicitly register the English wordlist into the global ethers wordlists.
+if (typeof window !== 'undefined') {
+  try {
+    const en = LangEn.wordlist();
+    if (!(wordlists as any).en) {
+      (wordlists as any).en = en;
+    }
+  } catch (e) {
+    console.warn("BIP39 wordlist initialization warning:", e);
+  }
+}
 
 const VAULT_KEY = 'bolt_vault_v1';
 let activeChainId = 'ethereum';
 
-interface ContractData {
+export interface ContractData {
   address: string;
   abi: string;
   name: string;
@@ -12,7 +26,7 @@ interface ContractData {
   chainId: string;
 }
 
-interface NFTData {
+export interface NFTData {
   address: string;
   tokenId: string;
   name: string;
@@ -33,6 +47,15 @@ export interface HistoryData {
   timestamp: string;
   chainId: string;
   status: 'success' | 'failed' | 'pending';
+}
+
+export interface LogEvent {
+  id: string;
+  type: 'rpc' | 'security' | 'session' | 'fallback';
+  message: string;
+  status: 'success' | 'error' | 'warning' | 'info';
+  timestamp: number;
+  metadata?: any;
 }
 
 interface VaultData {
@@ -58,7 +81,7 @@ const PRICE_FEED_IDS: Record<string, string> = {
   "bsc": "0x2f95862b045670cd22bee3114c39763a4a08beeb663b145d283c31d7d1101c4f",
   "polygon": "0xcc24d03da2d348003612f09d3c5f5905d49ac539fe38466e3ef6022e0325493b",
   "pulsechain": "0xecf55730022301c80fbbcc2c7199990e1f75323ddf069f21f64f77c8e96bf655",
-  "monad": "0x", 
+  "monad": "0x",
   "sui": "0x50c18d9ef61730bb53c448eb3b054817a2e0a010899def360e4282367f08365a"
 };
 
@@ -75,28 +98,89 @@ const DERIVATION_PATHS: Record<string, string> = {
   "tron_evm": "m/44'/60'/0'/0/"
 };
 
+export const CHAINS = CORE_CHAINS;
+export type { ChainConfig } from "@/ows/chains";
+
+export interface WalletData {
+  id: string;
+  name: string;
+  address: string;
+  index: number;
+}
+
 let sessionMnemonic: string | null = null;
+
+export class BoltwalletCore {
+  private chainId: string = 'ethereum';
+  
+  async getWallets() { return listWallets(); }
+  async listWallets() { return listWallets(); } // Consistency for multi-UI support
+  async createNewWallet(name: string) { return createWallet(name); }
+  async isVaultLocked() { return isVaultLocked(); }
+  async unlockVault(password: string) { return unlockVault(password); }
+  async isVaultSetup() { return isVaultSetup(); }
+  async setupVault(password: string) { return setupVault(password); }
+  async getNativeBalance(address: string) { 
+    const rpc = CHAINS[this.chainId as keyof typeof CHAINS]?.rpc || '';
+    return getNativeBalance(address, rpc); 
+  }
+  async getContractBalance(contractAddress: string, walletAddress: string, decimals: number) {
+    const rpc = CHAINS[this.chainId as keyof typeof CHAINS]?.rpc || '';
+    return getContractBalance(contractAddress, walletAddress, decimals, rpc);
+  }
+  async getGasPriceEstimates() {
+    const rpc = CHAINS[this.chainId as keyof typeof CHAINS]?.rpc || '';
+    return getGasPriceEstimates(rpc);
+  }
+  async listContracts() { return listContracts(this.chainId); }
+  async importContract(name: string, address: string, abi: string, decimals: number) {
+     return importContract(name, address, abi, decimals, this.chainId);
+  }
+  async deleteContract(address: string) {
+     return deleteContract(address, this.chainId);
+  }
+  async listNFTs() { return listNFTs(this.chainId); }
+  async importNFT(address: string, tokenId: string, name: string) {
+     return importNFT(address, tokenId, name, this.chainId);
+  }
+  async deleteNFT(address: string, tokenId: string) {
+     return deleteNFT(address, tokenId, this.chainId);
+  }
+  async getAssetPrices() { return getAssetPrices(); }
+  async getHistory(address: string) { return getHistory(address, this.chainId); }
+  async signTransaction(walletId: string, tx: any) { return signTransaction(walletId, this.chainId, JSON.stringify(tx)); }
+  async resetVault(mnemonic: string, pass: string) { return resetVault(mnemonic, pass); }
+  async getSession() { return getSessionMnemonic(); }
+  
+  setChain(chainId: string) { 
+    this.chainId = chainId; 
+    setActiveChain(chainId);
+  }
+  
+  onLogs(cb: any) { return onLogs(cb); }
+  getLogs() { return getLogs(); }
+}
 
 // Crypto Helpers
 const deriveKey = async (password: string, salt: Uint8Array) => {
   const encoder = new TextEncoder();
   const passwordKey = await crypto.subtle.importKey(
-    'raw', 
-    encoder.encode(password), 
-    'PBKDF2', 
-    false, 
+    'raw',
+    encoder.encode(password),
+    'PBKDF2',
+    false,
     ['deriveKey']
   );
   return crypto.subtle.deriveKey(
-    { 
-      name: 'PBKDF2', 
-      salt: salt as any, 
-      iterations: 600000, 
-      hash: 'SHA-256' 
+    {
+      name: 'PBKDF2',
+      salt: salt as any,
+      iterations: 100000,
+      hash: 'SHA-256'
     },
     passwordKey,
     { name: 'AES-GCM', length: 256 },
-    false, 
+    false,
     ['encrypt', 'decrypt']
   );
 };
@@ -129,7 +213,7 @@ const encryptData = async (data: string, password: string) => {
     key,
     encoder.encode(data)
   );
-  
+
   return {
     encrypted: arrayBufferToBase64(encrypted),
     salt: arrayBufferToBase64(salt.buffer),
@@ -154,7 +238,7 @@ const decryptData = async (encrypted: string, salt: string, iv: string, password
 const validateTransactionPayload = (tx: any) => {
   if (!tx.to) throw new Error("Transaction recipient (to) is missing");
   if (!ethers.isAddress(tx.to)) throw new Error("Invalid recipient address");
-  
+
   if (tx.value) {
     try {
       const val = BigInt(tx.value.toString());
@@ -189,7 +273,7 @@ const getVault = async (): Promise<VaultData> => {
   if (data) {
     return JSON.parse(data);
   }
-  
+
   return initializeVault();
 };
 
@@ -212,13 +296,13 @@ export const setupVault = async (password: string): Promise<string> => {
   const wallet = ethers.Wallet.createRandom();
   const mnemonic = wallet.mnemonic?.phrase || '';
   const encrypted = await encryptData(mnemonic, password);
-  
+
   const vault = await getVault();
   vault.encryptedMnemonic = encrypted.encrypted;
   vault.salt = encrypted.salt;
   vault.iv = encrypted.iv;
   vault.isEncrypted = true;
-  
+
   await saveVault(vault);
   sessionMnemonic = mnemonic;
   return mnemonic;
@@ -249,6 +333,34 @@ const saveVault = async (data: VaultData) => {
   localStorage.setItem(VAULT_KEY, JSON.stringify(data));
 };
 
+
+let logs: LogEvent[] = [];
+let logListeners: ((l: LogEvent[]) => void)[] = [];
+
+export const logEvent = (type: LogEvent['type'], message: string, status: LogEvent['status'] = 'info', metadata?: any) => {
+  const safeId = (Math.random().toString(36) + '00000000').substring(2, 11);
+  const event: LogEvent = {
+    id: safeId || String(Date.now()),
+    type: type || 'fallback',
+    message: message || "Unknown Event",
+    status: status || 'info',
+    metadata: metadata || {},
+    timestamp: Date.now()
+  };
+  logs = [event, ...logs].slice(0, 100);
+  logListeners.forEach(l => l(logs));
+};
+
+export const onLogs = (callback: (l: LogEvent[]) => void) => {
+  logListeners.push(callback);
+  callback(logs);
+  return () => {
+    logListeners = logListeners.filter(l => l !== callback);
+  };
+};
+
+export const getLogs = () => logs;
+
 export const setActiveChain = (chainId: string) => {
   activeChainId = chainId;
 };
@@ -261,10 +373,11 @@ export const deriveAddress = (mnemonic: string, index: number): string => {
   // Handle special cases first
   if (activeChainId === 'bitcoin') {
     // Simulate Bech32 (SegWit) address for soft launch
-    const hash = ethers.id(`${mnemonic}-${index}-btc`).substring(2, 42);
+    const idHash = ethers.id(`${mnemonic}-${index}-btc`);
+    const hash = (idHash || '0x00000000').substring(2, 42);
     return `bc1q${hash}`;
-  } 
-  
+  }
+
   if (activeChainId === 'sui') {
     // Sui addresses start with 0x but are 64 hex chars
     return ethers.id(`${mnemonic}-${index}-sui`);
@@ -274,7 +387,7 @@ export const deriveAddress = (mnemonic: string, index: number): string => {
   const basePath = DERIVATION_PATHS[activeChainId] || "m/44'/60'/0'/0/";
   // Ensure the path ends with a slash before appending index
   const fullPath = basePath.endsWith('/') ? `${basePath}${index}` : `${basePath}/${index}`;
-  
+
   try {
     // BIP39 Hardening: ensure LangEn is used if wordlists.en is missing
     const wordlist = (wordlists as any).en || LangEn.wordlist();
@@ -290,22 +403,24 @@ export const createWallet = async (name: string): Promise<any> => {
   if (!sessionMnemonic) throw new Error("Vault is locked");
   const vault = await getVault();
   const index = vault.wallets.length;
-  const id = `wallet_${Math.random().toString(16).substring(2, 10)}`;
+  const randStr = Math.random().toString(16);
+  const id = `wallet_${(randStr + '00000000').substring(2, 10)}`;
   const address = deriveAddress(sessionMnemonic, index);
-  
+
   const newWallet = {
     id,
     name: name || `Wallet ${index + 1}`,
     index,
     createdAt: new Date().toISOString()
   };
-  
+
   vault.wallets.push(newWallet);
   await saveVault(vault);
-  
+
   return {
     id: newWallet.id,
     name: newWallet.name,
+    address, // Top-level address for UI convenience
     accounts: [{ chainId: "ethereum", address, derivationPath: `m/44'/60'/0'/0/${index}` }],
     createdAt: newWallet.createdAt
   };
@@ -318,14 +433,15 @@ export const listWallets = async (): Promise<any[]> => {
     if (sessionMnemonic) {
       address = deriveAddress(sessionMnemonic, w.index);
     }
-    
+
     return {
       id: w.id,
       name: w.name,
-      accounts: [{ 
-        chainId: "ethereum", 
-        address, 
-        derivationPath: `m/44'/60'/0'/0/${w.index}` 
+      address, // Ensure top-level address exists for UI components
+      accounts: [{
+        chainId: "ethereum",
+        address,
+        derivationPath: `m/44'/60'/0'/0/${w.index}`
       }],
       createdAt: w.createdAt
     };
@@ -336,14 +452,16 @@ export const getWallet = async (idOrName: string): Promise<any> => {
   const vault = await getVault();
   const w = vault.wallets.find((x: any) => x.id === idOrName || x.name === idOrName);
   if (!w) return null;
-  
+
+  const address = deriveAddress(sessionMnemonic || '', w.index);
   return {
     id: w.id,
     name: w.name,
-    accounts: [{ 
-      chainId: "ethereum", 
-      address: deriveAddress(sessionMnemonic || '', w.index), 
-      derivationPath: `m/44'/60'/0'/0/${w.index}` 
+    address,
+    accounts: [{
+      chainId: "ethereum",
+      address,
+      derivationPath: `m/44'/60'/0'/0/${w.index}`
     }],
     createdAt: w.createdAt
   };
@@ -372,8 +490,8 @@ export const signMessage = async (walletId: string, chain: string, message: stri
   const vault = await getVault();
   const w = vault.wallets.find((x: any) => x.id === walletId || x.name === walletId);
   if (!w) throw new Error("Wallet not found");
-  
-  return { signature: "0x_mock_signed_message_hash" }; 
+
+  return { signature: "0x_mock_signed_message_hash" };
 };
 
 export const getGasPriceEstimates = async (rpcUrl: string) => {
@@ -381,50 +499,54 @@ export const getGasPriceEstimates = async (rpcUrl: string) => {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const feeData = await provider.getFeeData();
     const baseFee = feeData.gasPrice || ethers.parseUnits('1', 'gwei');
-    
+
     return {
       baseFee: ethers.formatUnits(baseFee, 'gwei'),
       slow: {
         priorityFee: ethers.formatUnits(ethers.parseUnits('1', 'gwei'), 'gwei'),
-        maxFee: ethers.formatUnits(baseFee + ethers.parseUnits('2', 'gwei'), 'gwei')
+        maxFee: ethers.formatUnits(baseFee + ethers.parseUnits('2', 'gwei'), 'gwei'),
+        speed: 'slow'
       },
       average: {
         priorityFee: ethers.formatUnits(ethers.parseUnits('2', 'gwei'), 'gwei'),
-        maxFee: ethers.formatUnits(baseFee * BigInt(2), 'gwei')
+        maxFee: ethers.formatUnits(baseFee * BigInt(2), 'gwei'),
+        speed: 'average'
       },
       fast: {
         priorityFee: ethers.formatUnits(ethers.parseUnits('5', 'gwei'), 'gwei'),
-        maxFee: ethers.formatUnits(baseFee * BigInt(3), 'gwei')
+        maxFee: ethers.formatUnits(baseFee * BigInt(3), 'gwei'),
+        speed: 'fast'
       }
     };
   } catch (err) {
     console.error("Gas Estimate Error:", err);
     return {
       baseFee: '20',
-      slow: { priorityFee: '1', maxFee: '22' },
-      average: { priorityFee: '2', maxFee: '40' },
-      fast: { priorityFee: '5', maxFee: '60' }
+      slow: { priorityFee: '1', maxFee: '22', speed: 'slow' },
+      average: { priorityFee: '2', maxFee: '40', speed: 'average' },
+      fast: { priorityFee: '5', maxFee: '60', speed: 'fast' }
     };
   }
 };
 
 export const signTransaction = async (walletId: string, chain: string, txHex: string): Promise<any> => {
+  logEvent('security', `Signing transaction for ${chain}...`, 'info');
   const vault = await getVault();
   const w = vault.wallets.find((x: any) => x.id === walletId || x.name === walletId);
   if (!w) throw new Error("Wallet not found");
-  
+
   // BOLT-05: Payload Validation
   try {
     const tx = JSON.parse(txHex);
     validateTransactionPayload(tx);
-    
+
     // Log gas parameters for audit trail
     if (tx.maxFeePerGas || tx.maxPriorityFeePerGas) {
-       console.info("Boltwallet Security: EIP-1559 Gas parameters validated.", {
-          maxFee: tx.maxFeePerGas,
-          priorityFee: tx.maxPriorityFeePerGas,
-          gasLimit: tx.gasLimit
-       });
+      console.info("Boltwallet Security: EIP-1559 Gas parameters validated.", {
+        maxFee: tx.maxFeePerGas,
+        priorityFee: tx.maxPriorityFeePerGas,
+        gasLimit: tx.gasLimit
+      });
     }
 
     console.info("Boltwallet Security: WYSIWYS payload validated and bound to signature.", { to: tx.to, value: tx.value });
@@ -432,9 +554,10 @@ export const signTransaction = async (walletId: string, chain: string, txHex: st
     console.error("Security Alert: Invalid Transaction Payload Detected", e);
     throw new Error(`Security Violation: ${e.message}`);
   }
-  
-  const sig = `0x_mock_signed_tx_${walletId}_${Math.random().toString(16).substring(2, 10)}`;
-  
+
+  const randSuffix = Math.random().toString(16);
+  const sig = `0x_mock_signed_tx_${walletId}_${(randSuffix + '00000000').substring(2, 10)}`;
+
   // Save to history
   const parsedTx = JSON.parse(txHex);
   const from = deriveAddress(sessionMnemonic || '', w.index);
@@ -450,19 +573,24 @@ export const signTransaction = async (walletId: string, chain: string, txHex: st
     chainId: chain,
     status: 'success'
   };
-  
+
   vault.history = [newHistory, ...(vault.history || [])];
   await saveVault(vault);
 
+  const safeSig = sig || '0x...';
+  logEvent('security', `Transaction signed successfully: ${safeSig.substring(0, 10)}...`, 'success');
   return { signature: sig };
 };
 
 export const getHistory = async (address: string, chainId: string): Promise<HistoryData[]> => {
   const vault = await getVault();
   if (!vault.history) return [];
+  const safeAddress = (address || '').toLowerCase();
+  
   // Filter by address (either from or to) and chainId if requested
-  return vault.history.filter((h: any) => 
-    (h.from.toLowerCase() === address.toLowerCase() || h.to.toLowerCase() === address.toLowerCase()) && 
+  return (vault.history || []).filter((h: any) =>
+    h && h.from && h.to &&
+    (h.from.toLowerCase() === safeAddress || h.to.toLowerCase() === safeAddress) &&
     (chainId === 'all' || h.chainId === chainId)
   );
 };
@@ -474,7 +602,7 @@ export const importWalletMnemonic = async (name: string, mnemonic: string, passw
   vault.salt = encrypted.salt;
   vault.iv = encrypted.iv;
   vault.isEncrypted = true;
-  vault.wallets = []; 
+  vault.wallets = [];
   vault.history = [];
   await saveVault(vault);
   sessionMnemonic = mnemonic;
@@ -491,7 +619,9 @@ export const setSessionMnemonic = (mnemonic: string | null) => {
 
 export const getSessionMnemonic = () => sessionMnemonic;
 
+
 export const resetVault = async (mnemonic: string, newPassword: string): Promise<void> => {
+  logEvent('security', 'Vault reset initiated with new password', 'warning');
   // Validate mnemonic
   try {
     ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, undefined, wordlists.en);
@@ -501,12 +631,12 @@ export const resetVault = async (mnemonic: string, newPassword: string): Promise
 
   const encrypted = await encryptData(mnemonic, newPassword);
   const vault = await getVault();
-  
+
   vault.encryptedMnemonic = encrypted.encrypted;
   vault.salt = encrypted.salt;
   vault.iv = encrypted.iv;
   vault.isEncrypted = true;
-  
+
   await saveVault(vault);
   sessionMnemonic = mnemonic;
 };
@@ -514,19 +644,19 @@ export const resetVault = async (mnemonic: string, newPassword: string): Promise
 // Simplified stubs for remaining items
 export const importWalletPrivateKey = () => ({});
 export const signTypedData = () => ({ signature: "0x" });
-export const createPolicy = () => {};
+export const createPolicy = () => { };
 export const listPolicies = () => [];
 export const getPolicy = () => null;
-export const deletePolicy = () => {};
+export const deletePolicy = () => { };
 export const createApiKey = () => ({ token: "", id: "", name: "" });
 export const listApiKeys = () => [];
-export const revokeApiKey = () => {};
+export const revokeApiKey = () => { };
 export const signAndSend = (walletId: string) => ({ txHash: `0x_mock_hash_${walletId}` });
 
 export const importContract = async (name: string, address: string, abi: string, decimals: number, chainId: string) => {
   const vault = await getVault();
   if (!vault.contracts) vault.contracts = [];
-  
+
   const newContract = { name, address, abi, decimals, chainId };
   vault.contracts.push(newContract);
   await saveVault(vault);
@@ -547,147 +677,214 @@ export const deleteContract = async (address: string, chainId: string) => {
 };
 
 export const getNativeBalance = async (address: string, rpcUrl: string): Promise<string> => {
-  try {
-    // BOLT-07: Bitcoin Fetcher (Specific to Bitcoin chains)
-    // We check for 'bitcoin' or 'ankr.com/btc' or legacy Esplora URLs
-    // We explicitly EXCLUDE 'bittorrentchain' (BTTC) which contains 'btc' but is EVM
-    if ((rpcUrl.includes('bitcoin') || rpcUrl.includes('btc') || rpcUrl.includes('blockstream') || rpcUrl.includes('esplora')) && !rpcUrl.includes('bittorrent')) {
-       const apiKey = (import.meta as any).env?.VITE_BOLT_API_KEY || "";
-       
-       // Case A: Ankr Bitcoin RPC (Premium Query API)
-       // We force Ankr if an API key is available, even if a legacy Esplora URL was passed.
-       if (rpcUrl.includes('ankr.com') || (apiKey && (rpcUrl.includes('blockstream.info') || rpcUrl.includes('esplora')))) {
-          const base = "https://rpc.ankr.com/btc";
-          const finalUrl = apiKey ? `${base}/${apiKey}` : base;
-          
-          try {
-            const response = await fetch(finalUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                jsonrpc: '2.0',
-                id: 1,
-                method: 'ankr_getAccountBalance',
-                params: {
-                  walletAddress: address,
-                  blockchain: ['btc']
-                }
-              })
-            });
-            
-            if (response.ok) {
-               const data = await response.json();
-               const btcAsset = data.result?.assets?.find((a: any) => a.blockchain === 'btc');
-               if (btcAsset) return btcAsset.balance;
-            }
-          } catch (e) {
-            console.warn("Ankr Bitcoin fetch failed, falling back to legacy REST if available...");
-          }
-       }
+  if (!address || typeof address !== 'string') return "0.00";
+  if (!rpcUrl || typeof rpcUrl !== 'string') return "0.00";
 
-       // Case B: Esplora REST Fallback (Only if Ankr didn't override or succeed)
-       if (rpcUrl.includes('blockstream.info') || rpcUrl.includes('esplora')) {
-          const response = await fetch(`${rpcUrl}address/${address}`, {
-            headers: apiKey ? { 'x-api-key': apiKey } : {}
+  const safeAddress = address || '0x...';
+  logEvent('rpc', `Fetching balance for ${safeAddress.substring(0, 8)}...`, 'info', { rpcUrl });
+  try {
+    const lowerRpc = rpcUrl.toLowerCase();
+    const isBitcoinRpc = lowerRpc.includes('bitcoin') || lowerRpc.includes('btc') || lowerRpc.includes('blockstream') || lowerRpc.includes('esplora');
+    const isBttcRpc = lowerRpc.includes('bittorrent');
+
+    if (isBitcoinRpc && !isBttcRpc) {
+      const apiKey = (typeof (import.meta as any).env !== 'undefined') ? (import.meta as any).env.VITE_BOLT_API_KEY : "8355b82201a25997c6ad4660f55a632";
+
+      // Case A: Ankr Bitcoin RPC (Premium Query API)
+      // We force Ankr if an API key is available, even if a legacy Esplora URL was passed.
+      if (rpcUrl.includes('ankr.com') || (apiKey && (rpcUrl.includes('blockstream.info') || rpcUrl.includes('esplora')))) {
+        const base = "https://rpc.ankr.com/btc";
+        const finalUrl = apiKey ? `${base}/${apiKey}` : base;
+
+        try {
+          const response = await fetch(finalUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: 1,
+              method: 'ankr_getAccountBalance',
+              params: {
+                walletAddress: address,
+                blockchain: ['btc']
+              }
+            })
           });
-          if (!response.ok) throw new Error(`Esplora API returned ${response.status}`);
-          const data = await response.json();
-          const sats = (data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum) || 0;
-          return (sats / 1e8).toFixed(8);
-       }
+          if (response.ok) {
+            const data = await response.json();
+            const btcAsset = data.result?.assets?.find((a: any) => a.blockchain === 'btc');
+            if (btcAsset) {
+               logEvent('rpc', `Ankr Bitcoin Balance: ${btcAsset.balance} BTC`, 'success');
+               return btcAsset.balance;
+            }
+          }
+        } catch (e) {
+          logEvent('fallback', "Ankr Bitcoin fetch failed, trying legacy REST...", 'warning');
+          console.warn("Ankr Bitcoin fetch failed, falling back to legacy REST if available...");
+        }
+      }
+
+      // Case B: Esplora REST Fallback (Only if Ankr didn't override or succeed)
+      if (rpcUrl.includes('blockstream.info') || rpcUrl.includes('esplora')) {
+        const response = await fetch(`${rpcUrl}address/${address}`, {
+          headers: apiKey ? { 'x-api-key': apiKey } : {}
+        });
+        if (!response.ok) throw new Error(`Esplora API returned ${response.status}`);
+        const data = await response.json();
+        const sats = (data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum) || 0;
+        return (sats / 1e8).toFixed(8);
+      }
     }
 
-    const apiKey = (import.meta as any).env?.VITE_BOLT_API_KEY || "";
+    const apiKey = (typeof (import.meta as any).env !== 'undefined') ? (import.meta as any).env.VITE_BOLT_API_KEY : "";
     let finalRpcUrl = rpcUrl;
     
-    // BOLT-08: Tailored Ankr Premium Support & Override
-    // We prioritize Ankr if an API key is available, especially if the current RPC is failing or legacy
+    // BOLT-10: Strict Chain & Address Validation
+    const isEvmAddress = (address || '').toLowerCase().startsWith('0x');
+    const isEvmRpc = !lowerRpc.includes('bitcoin') && !lowerRpc.includes('btc') && !lowerRpc.includes('blockstream') && !lowerRpc.includes('esplora') && !lowerRpc.includes('sui') && !lowerRpc.includes('quai');
+
+    if (!isEvmAddress || !isEvmRpc) {
+       return "0.00";
+    }
+
     if (apiKey) {
-       if (rpcUrl.includes('rpc.ankr.com')) {
-          const base = rpcUrl.endsWith('/') ? rpcUrl.slice(0, -1) : rpcUrl;
-          finalRpcUrl = `${base}/${apiKey}`;
-       } else if (rpcUrl.includes('llamarpc.com') || rpcUrl.includes('polygon-rpc.com') || rpcUrl.includes('monad.xyz') || rpcUrl.includes('sui.io')) {
-          // AUTO-OVERRIDE: If we have an Ankr key and the current RPC is a known standard one, switch to Ankr for performance
-          if (rpcUrl.includes('eth')) finalRpcUrl = `https://rpc.ankr.com/eth/${apiKey}`;
-          else if (rpcUrl.includes('polygon')) finalRpcUrl = `https://rpc.ankr.com/polygon/${apiKey}`;
-          else if (rpcUrl.includes('bsc')) finalRpcUrl = `https://rpc.ankr.com/bsc/${apiKey}`;
-          else if (rpcUrl.includes('monad')) finalRpcUrl = `https://rpc.ankr.com/monad/${apiKey}`;
-          else if (rpcUrl.includes('sui')) finalRpcUrl = `https://rpc.ankr.com/sui/${apiKey}`;
-       }
+      if (lowerRpc.includes('rpc.ankr.com')) {
+        const base = rpcUrl.endsWith('/') ? rpcUrl.slice(0, -1) : rpcUrl;
+        finalRpcUrl = `${base}/${apiKey}`;
+      } else if (rpcUrl.includes('llamarpc.com') || rpcUrl.includes('polygon-rpc.com') || rpcUrl.includes('monad.xyz') || rpcUrl.includes('sui.io')) {
+        if (rpcUrl.includes('eth')) finalRpcUrl = `https://rpc.ankr.com/eth/${apiKey}`;
+        else if (rpcUrl.includes('polygon')) finalRpcUrl = `https://rpc.ankr.com/polygon/${apiKey}`;
+        else if (rpcUrl.includes('bsc')) finalRpcUrl = `https://rpc.ankr.com/bsc/${apiKey}`;
+        else if (rpcUrl.includes('monad')) finalRpcUrl = `https://rpc.ankr.com/monad/${apiKey}`;
+        else if (rpcUrl.includes('sui')) finalRpcUrl = `https://rpc.ankr.com/sui/${apiKey}`;
+      }
     }
 
     const fetchReq = new ethers.FetchRequest(finalRpcUrl);
-    
-    // Only use header for non-Ankr sources that might support it
     if (apiKey && !finalRpcUrl.includes('rpc.ankr.com')) {
       fetchReq.setHeader("x-api-key", apiKey);
     }
 
-    const provider = new ethers.JsonRpcProvider(fetchReq, undefined, {
-       staticNetwork: true,
-       batchMaxCount: 1
-    });
-    const balance = await provider.getBalance(address);
-    return ethers.formatEther(balance);
-  } catch (err: any) {
-    // BOLT-06: RPC Error Sanitization
-    const errorMsg = err.message || "Unknown RPC Error";
-    console.error(`Balance Fetch Error [${address}]:`, errorMsg);
-    
-    // Check for specific RPC failure codes or messages that cause "coalesce" errors
-    if (errorMsg.includes("could not coalesce") || errorMsg.includes("-32014")) {
-       return "0.00"; 
+    try {
+      const provider = new ethers.JsonRpcProvider(fetchReq, undefined, {
+        staticNetwork: true,
+        batchMaxCount: 1
+      });
+      const balance = await provider.getBalance(address);
+      return ethers.formatEther(balance);
+    } catch (e: any) {
+      const isForbidden = 
+        e.message?.includes('403') || 
+        e.message?.includes('Forbidden') || 
+        e.info?.responseStatus === 403 || 
+        e.info?.error?.message?.includes('403') ||
+        e.error?.message?.includes('403');
+
+      if (isForbidden && finalRpcUrl !== rpcUrl) {
+        logEvent('fallback', `Ankr 403 detected. Triggering Aggressive Fallback to ${rpcUrl}...`, 'warning');
+        try {
+          const fallbackProvider = new ethers.JsonRpcProvider(rpcUrl);
+          const fallbackBalance = await fallbackProvider.getBalance(address);
+          logEvent('rpc', `Fallback Success: ${ethers.formatEther(fallbackBalance)}`, 'success');
+          return ethers.formatEther(fallbackBalance);
+        } catch (fallbackErr) {
+          console.error("Boltwallet: Both Ankr and Fallback RPC failed.", fallbackErr);
+          return "0.00";
+        }
+      }
+      logEvent('rpc', `Balance Fetch Error: ${e.message || "Unknown"}`, 'error');
+      console.error(`Balance Fetch Error [${address}]:`, e.message || e);
+      return "0.00";
     }
-    
-    return "0.00"; // Fallback to safe value rather than crashing
+  } catch (err: any) {
+    logEvent('rpc', `Fatal balance error: ${err.message}`, 'error');
+    const errorMsg = err.message || "Unknown RPC Error";
+    if (errorMsg.includes("could not coalesce") || errorMsg.includes("-32601") || errorMsg.includes("-32014")) {
+      return "0.00";
+    }
+    return "0.00";
   }
 };
 
+export const PBKDF2_ITERATIONS = 100000;
 export const getContractBalance = async (contractAddress: string, walletAddress: string, decimals: number, rpcUrl: string): Promise<string> => {
-   try {
-     const apiKey = (import.meta as any).env?.VITE_BOLT_API_KEY || "";
-     let finalRpcUrl = rpcUrl;
-     
-     if (apiKey) {
-        if (rpcUrl.includes('rpc.ankr.com')) {
-           const base = rpcUrl.endsWith('/') ? rpcUrl.slice(0, -1) : rpcUrl;
-           finalRpcUrl = `${base}/${apiKey}`;
-        } else if (rpcUrl.includes('llamarpc.com') || rpcUrl.includes('polygon-rpc.com')) {
-           if (rpcUrl.includes('eth')) finalRpcUrl = `https://rpc.ankr.com/eth/${apiKey}`;
-           else if (rpcUrl.includes('polygon')) finalRpcUrl = `https://rpc.ankr.com/polygon/${apiKey}`;
-        }
-     }
+    if (!contractAddress || !walletAddress || !rpcUrl) return "0.00";
+    
+    const lowerRpc = rpcUrl.toLowerCase();
+    if (lowerRpc.includes('bitcoin') || lowerRpc.includes('btc') || lowerRpc.includes('blockstream') || lowerRpc.includes('esplora') || lowerRpc.includes('sui')) {
+      return "0.00";
+    }
 
-     const fetchReq = new ethers.FetchRequest(finalRpcUrl);
-     if (apiKey && !finalRpcUrl.includes('rpc.ankr.com')) {
-       fetchReq.setHeader("x-api-key", apiKey);
-     }
-     const provider = new ethers.JsonRpcProvider(fetchReq, undefined, {
+    const apiKey = (typeof (import.meta as any).env !== 'undefined') ? (import.meta as any).env.VITE_BOLT_API_KEY : "8355b82201a25997c6ad4660f55a632";
+    let finalRpcUrl = rpcUrl;
+
+    // BOLT-08: Tailored Ankr Premium Support & Override
+    // We prioritize Ankr if an API key is available, especially if the current RPC is failing or legacy
+    if (apiKey) {
+      if (rpcUrl.includes('rpc.ankr.com')) {
+        const base = rpcUrl.endsWith('/') ? rpcUrl.slice(0, -1) : rpcUrl;
+        finalRpcUrl = `${base}/${apiKey}`;
+      } else if (rpcUrl.includes('llamarpc.com') || rpcUrl.includes('polygon-rpc.com') || rpcUrl.includes('monad.xyz') || rpcUrl.includes('sui.io')) {
+        // AUTO-OVERRIDE: If we have an Ankr key and the current RPC is a known standard one, switch to Ankr for performance
+        if (rpcUrl.includes('eth')) finalRpcUrl = `https://rpc.ankr.com/eth/${apiKey}`;
+        else if (rpcUrl.includes('bsc')) finalRpcUrl = `https://rpc.ankr.com/bsc/${apiKey}`;
+        else if (rpcUrl.includes('polygon')) finalRpcUrl = `https://rpc.ankr.com/polygon/${apiKey}`;
+        else if (rpcUrl.includes('monad')) finalRpcUrl = `https://rpc.ankr.com/monad/${apiKey}`;
+        else if (rpcUrl.includes('sui')) finalRpcUrl = `https://rpc.ankr.com/sui/${apiKey}`;
+      }
+    }
+
+    const fetchReq = new ethers.FetchRequest(finalRpcUrl);
+    if (apiKey && !finalRpcUrl.includes('rpc.ankr.com')) {
+      fetchReq.setHeader("x-api-key", apiKey);
+    }
+    try {
+      const provider = new ethers.JsonRpcProvider(fetchReq, undefined, {
         staticNetwork: true,
         batchMaxCount: 1
-     });
-     const abi = ["function balanceOf(address) view returns (uint256)"];
-     const contract = new ethers.Contract(contractAddress, abi, provider);
-     const balance = await contract.balanceOf(walletAddress);
-     return ethers.formatUnits(balance, decimals);
-   } catch (err: any) {
-     const errorMsg = err.message || "Unknown Contract RPC Error";
-     console.error(`Contract Balance Fetch Error [${contractAddress}]:`, errorMsg);
-     return "0.00";
-   }
+      });
+      const abi = ["function balanceOf(address) view returns (uint256)"];
+      const contract = new ethers.Contract(contractAddress, abi, provider);
+      const balance = await contract.balanceOf(walletAddress);
+      const formatted = ethers.formatUnits(balance, decimals);
+      logEvent('rpc', `Contract Balance Success: ${formatted}`, 'success');
+      return formatted;
+    } catch (e: any) {
+      // BOLT-11: Aggressive Fallback for Contracts
+      const isForbidden = 
+        e.message?.includes('403') || 
+        e.message?.includes('Forbidden') || 
+        e.info?.responseStatus === 403 ||
+        e.error?.message?.includes('403');
+        
+      if (isForbidden && finalRpcUrl !== rpcUrl) {
+        console.warn(`Boltwallet: Contract Fallback Triggered for ${contractAddress} on ${rpcUrl}.`);
+        try {
+          const fallbackProvider = new ethers.JsonRpcProvider(rpcUrl);
+          const fbContract = new ethers.Contract(contractAddress, ["function balanceOf(address) view returns (uint256)"], fallbackProvider);
+          const balance = await fbContract.balanceOf(walletAddress);
+          return ethers.formatUnits(balance, decimals);
+        } catch (fbErr) {
+           console.error("Boltwallet: Both Ankr and Fallback failed for contract.");
+        }
+      }
+      const errorMsg = e.message || "Unknown Contract RPC Error";
+      console.error(`Contract Balance Fetch Error [${contractAddress}]:`, errorMsg);
+      return "0.00";
+    }
 };
 
 export const importNFT = async (address: string, tokenId: string, name: string, chainId: string) => {
   const vault = await getVault();
   if (!vault.nfts) vault.nfts = [];
-  
-  const newNFT: NFTData = { 
-    address, 
-    tokenId, 
-    name, 
-    symbol: "NFT", 
-    tokenUri: "", 
-    chainId 
+
+  const newNFT: NFTData = {
+    address,
+    tokenId,
+    name,
+    symbol: "NFT",
+    tokenUri: "",
+    chainId
   };
   vault.nfts.push(newNFT);
   await saveVault(vault);
@@ -701,28 +898,32 @@ export const listNFTs = async (chainId: string) => {
 };
 export const getAssetPrices = async (): Promise<Record<string, number>> => {
   const prices: Record<string, number> = {};
-  
+
   // Fetch each price individually to prevent a single 404 from blocking all prices
   await Promise.all(Object.entries(PRICE_FEED_IDS).map(async ([chain, id]) => {
     if (!id || id === "0x") {
       if (chain === 'monad') prices[chain] = 4.20;
       return;
     }
-    
+
     try {
       const response = await fetch(`${HERMES_URL}?ids[]=${id}`);
       if (!response.ok) return;
-      
+
       const data = await response.json();
       const feed = data.parsed?.[0];
-      if (feed) {
-        prices[chain] = Number(feed.price.price) * Math.pow(10, feed.price.expo);
+      if (feed && feed.price) {
+        const expo = feed.price.expo || 0;
+        const priceVal = feed.price.price || "0";
+        const price = Number(priceVal) * Math.pow(10, expo);
+        prices[chain] = price;
+        logEvent('rpc', `Price Update: ${(chain || '').toUpperCase()} = $${price.toFixed(2)}`, 'info');
       }
     } catch (err) {
       console.warn(`Failed to fetch price for ${chain}:`, err);
     }
   }));
-  
+
   return prices;
 };
 

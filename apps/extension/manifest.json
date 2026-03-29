@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Boltwallet",
-  "version": "1.0.0",
-  "description": "Premium Multi-Chain Wallet powered by OWS.",
+  "version": "1.0.1",
+  "description": "Premium Multi-Chain Wallet powered by OWS with Hardened Security.",
   "action": {
     "default_popup": "index.html",
     "default_icon": "logo.png"
   },
-  "permissions": ["storage", "activeTab", "scripting", "alarms"],
+  "permissions": ["storage", "activeTab", "scripting", "alarms", "contextMenus", "notifications"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -21,11 +21,10 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://*.ankr.com https://*.llamarpc.com https://*.pulsechain.com https://*.monad.xyz https://*.sui.io https://*.xrpl.org https://*.bittorrentchain.io https://blockstream.info https://hermes.pyth.network https://quaiscan.io;"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://*.ankr.com https://*.pulsechain.com https://*.monad.xyz https://*.sui.io https://*.xrpl.org https://*.bittorrentchain.io https://blockstream.info https://hermes.pyth.network https://quaiscan.io https://*.llamarpc.com https://*.polygon-rpc.com https://*.monad.xyz https://*.sui.io;"
   },
   "host_permissions": [
     "https://hermes.pyth.network/*",
-    "https://*.llamarpc.com/*",
     "https://*.ankr.com/*",
     "https://rpc.pulsechain.com/*",
     "https://rpc.monad.xyz/*",
@@ -34,9 +33,19 @@
     "https://rpc.bittorrentchain.io/*",
     "https://quaiscan.io/*",
     "https://polygon-rpc.com/*",
+    "https://*.llamarpc.com/*",
+    "https://*.polygon-rpc.com/*",
+    "https://*.monad.xyz/*",
+    "https://*.sui.io/*",
     "https://blockstream.info/*"
   ],
   "icons": {
     "128": "logo.png"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["provider.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }

@@ -29,14 +29,52 @@ import {
   Key,
   ArrowLeft,
   User,
-  Users
+  Users,
+  ShieldCheck,
+  Palette,
+  Banknote,
+  Terminal,
+  Download,
+  Activity
 } from 'lucide-react';
 import { Button } from '@boltwallet/ui';
 import { NetworkIcon } from './components/NetworkIcons';
-import { BoltwalletCore, WalletData, ContractData, NFTData, CHAINS, HistoryData } from '@boltwallet/core';
+import { WalletData, ContractData, NFTData, CHAINS, HistoryData, LogEvent, BoltwalletCore } from './ows/ows-core';
 import { ethers } from 'ethers';
 
 const core = new BoltwalletCore() as any;
+
+// Unified Storage Utility for Web & Extension
+const boltStorage = {
+  getItem: async (key: string): Promise<string | null> => {
+    if (typeof window !== 'undefined' && (window as any).chrome?.storage?.local) {
+      return new Promise((resolve) => {
+        (window as any).chrome.storage.local.get([key], (result: any) => {
+          resolve(result[key] || localStorage.getItem(key));
+        });
+      });
+    }
+    return localStorage.getItem(key);
+  },
+  setItem: async (key: string, value: string) => {
+    localStorage.setItem(key, value);
+    if (typeof window !== 'undefined' && (window as any).chrome?.storage?.local) {
+      await (window as any).chrome.storage.local.set({ [key]: value });
+    }
+  },
+  removeItem: async (key: string) => {
+    localStorage.removeItem(key);
+    if (typeof window !== 'undefined' && (window as any).chrome?.storage?.local) {
+      await (window as any).chrome.storage.local.remove([key]);
+    }
+  },
+  clear: async () => {
+    localStorage.clear();
+    if (typeof window !== 'undefined' && (window as any).chrome?.storage?.local) {
+      await (window as any).chrome.storage.local.clear();
+    }
+  }
+};
 
 const THEMES = [
   { id: 'bolt', primary: '#00D1FF', secondary: '#4F46E5', name: 'BOLT' },
@@ -53,6 +91,12 @@ const App = () => {
   const [wallets, setWallets] = useState<WalletData[]>([]);
   const [isCreating, setIsCreating] = useState(false);
   const [isPopup, setIsPopup] = useState(false);
+  const [selectedCurrency, setSelectedCurrency] = useState('USD');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'appearance' | 'currency' | 'logs' | 'extension'>('general');
+  const [logs, setLogs] = useState<LogEvent[]>([]);
+  const [sessionTimeout, setSessionTimeout] = useState(15); // minutes
+  const [logVerbosity, setLogVerbosity] = useState<'compact' | 'verbose'>('compact');
+  const [customColors, setCustomColors] = useState({ primary: '#00D1FF', secondary: '#4F46E5' });
   const [showVaultAnimation, setShowVaultAnimation] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSend, setShowSend] = useState(false);
@@ -135,6 +179,17 @@ const App = () => {
   ];
 
   useEffect(() => {
+    const handleHash = () => {
+      if (window.location.hash === '#recovery') {
+        setShowRecovery(true);
+      }
+    };
+    handleHash();
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
+  useEffect(() => {
     const handleResize = () => {
       const popup = window.innerWidth < 600 || !!(window as any).chrome?.runtime?.id;
       setIsPopup(popup);
@@ -142,16 +197,36 @@ const App = () => {
     };
     handleResize();
     window.addEventListener('resize', handleResize);
-    
-    // Load persisted theme
-    const savedTheme = localStorage.getItem('bolt_theme_id');
-    if (savedTheme) {
-      const idx = THEMES.findIndex(t => t.id === savedTheme);
-      if (idx !== -1) setCurrentThemeIdx(idx);
-    }
+
+    const loadSettings = async () => {
+      const timeout = await boltStorage.getItem('bolt_session_timeout');
+      const verbosity = await boltStorage.getItem('bolt_log_verbosity');
+      if (timeout) setSessionTimeout(parseInt(timeout));
+      if (verbosity) setLogVerbosity(verbosity as any);
+      
+      // Load persisted theme
+      const savedTheme = localStorage.getItem('bolt_theme_id');
+      if (savedTheme) {
+        const idx = THEMES.findIndex(t => t.id === savedTheme);
+        if (idx !== -1) setCurrentThemeIdx(idx);
+      }
+    };
 
     const initSecurity = async () => {
-      // 1. Check for background session (Extension Bridge)
+      // 1. Restore persistent settings
+      const savedChain = await boltStorage.getItem('selectedChain');
+      if (savedChain) {
+        setSelectedChain(savedChain);
+        core.setChain(savedChain);
+      }
+
+      const savedCurrency = await boltStorage.getItem('bolt_currency');
+      if (savedCurrency) setSelectedCurrency(savedCurrency);
+
+      const savedColors = await boltStorage.getItem('bolt_custom_colors');
+      if (savedColors) setCustomColors(JSON.parse(savedColors));
+
+      // 2. Check for background session
       // @ts-ignore
       if (window.chrome?.runtime?.id) {
          // @ts-ignore
@@ -173,23 +248,65 @@ const App = () => {
         setIsLocked(true);
       }
     };
+
+    loadSettings();
     initSecurity();
+
+    // Subscribe to local logs
+    const unsubscribeLogs = (core as any).onLogs ? (core as any).onLogs((newLogs: any[]) => {
+       setLogs(prev => [...prev, ...newLogs].slice(-100));
+    }) : null;
+
+    // Fetch and Listen to Background logs
+    const extensionChrome = (window as any).chrome;
+    if (typeof extensionChrome !== 'undefined' && extensionChrome.runtime?.sendMessage) {
+       extensionChrome.runtime.sendMessage({ type: 'BOLT_GET_LOGS' }, (response: any) => {
+          if (response?.logs) setLogs(prev => [...prev, ...response.logs].slice(-100));
+       });
+
+       const handleBackgroundLog = (msg: any) => {
+          if (msg.type === 'BOLT_LOG_EVENT') {
+             setLogs(prev => [...prev, msg.log].slice(-100));
+          }
+       };
+       extensionChrome.runtime.onMessage.addListener(handleBackgroundLog);
+    }
 
     core.getWallets().then(setWallets);
     core.listContracts().then(setContracts);
     core.listNFTs().then(setNfts);
 
-    return () => window.removeEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (unsubscribeLogs) unsubscribeLogs();
+    };
   }, []);
 
   useEffect(() => {
-    if (contracts.length > 0 && activeWallet) {
-      contracts.forEach(async (c) => {
-        const balance = await core.getContractBalance(c.address, activeWallet.address, c.decimals);
-        setContractBalances(prev => ({ ...prev, [c.address]: balance }));
+    boltStorage.setItem('bolt_session_timeout', sessionTimeout.toString());
+    boltStorage.setItem('bolt_log_verbosity', logVerbosity);
+    
+    if (isPopup && (window as any).chrome?.runtime?.sendMessage) {
+      (window as any).chrome.runtime.sendMessage({ 
+        type: 'BOLT_UPDATE_SETTINGS', 
+        settings: { sessionTimeout, logVerbosity } 
+      }).catch(() => {});
+    }
+  }, [sessionTimeout, logVerbosity, isPopup]);
+
+  useEffect(() => {
+    if (contracts.length > 0 && activeWallet?.address) {
+      const relevantContracts = contracts.filter(c => c.chainId === selectedChain);
+      relevantContracts.forEach(async (c) => {
+        try {
+          const balance = await core.getContractBalance(c.address, activeWallet.address, c.decimals);
+          setContractBalances(prev => ({ ...prev, [c.address]: balance || "0.00" }));
+        } catch (err) {
+          console.warn(`Failed to fetch balance for ${c.name}:`, err);
+        }
       });
     }
-  }, [contracts, activeWallet]);
+  }, [contracts, activeWallet, selectedChain, selectedChain]);
 
   // Price & Balance Synchronization
   useEffect(() => {
@@ -201,26 +318,40 @@ const App = () => {
         setPrices(newPrices);
 
         const balances: Record<string, string> = {};
-        for (const w of wallets) {
-          if (!w.address || w.address === '0x0000000000000000000000000000000000000000') continue;
+        for (const w of (wallets || [])) {
+          if (!w?.address || w.address === '0x0000000000000000000000000000000000000000') continue;
           const bal = await core.getNativeBalance(w.address);
-          balances[w.id] = bal;
+          balances[w.id] = bal || "0.00";
         }
         setNativeBalances(balances);
 
         let total = 0;
         const nativePrice = newPrices[selectedChain] || 0;
         Object.values(balances).forEach(bal => {
-          total += parseFloat(bal) * nativePrice;
+          const val = parseFloat(bal as string);
+          if (!isNaN(val)) total += val * nativePrice;
         });
 
         // Add contract balances to total (assuming $1 for tokens if price not found, for simplified but non-zero view)
+        // Only include contracts for the active chain
         Object.entries(contractBalances).forEach(([addr, bal]) => {
-           const tokenPrice = newPrices[addr] || 1; // Fallback to $1 if token price not in map
-           total += parseFloat(bal) * tokenPrice;
+           const contract = contracts.find(c => c.address === addr);
+           if (!contract || contract.chainId !== selectedChain) return;
+           
+           const tokenPrice = newPrices[addr] || 1; 
+           const val = parseFloat(bal as string);
+           if (!isNaN(val)) total += val * tokenPrice;
         });
 
-        setTotalUSD(total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+        // Currency Conversion Logic
+        const fxRates: Record<string, number> = { 'USD': 1, 'EUR': 0.92, 'GBP': 0.79, 'JPY': 151, 'CNY': 7.23, 'BTC': 1 / (newPrices['bitcoin'] || 65000), 'ETH': 1 / (newPrices['ethereum'] || 3500) };
+        const rate = fxRates[selectedCurrency] || 1;
+        const convertedTotal = total * rate;
+
+        const symbols: Record<string, string> = { 'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'CNY': '¥', 'BTC': '₿', 'ETH': 'Ξ' };
+        const symbol = symbols[selectedCurrency] || '';
+        
+        setTotalUSD(`${symbol}${convertedTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 
         if (activeWallet) {
           const hist = await core.getHistory(activeWallet.address, 'all');
@@ -234,7 +365,20 @@ const App = () => {
     syncData();
     const interval = setInterval(syncData, 15000); // 15s refresh
     return () => clearInterval(interval);
-  }, [isLocked, selectedChain, wallets, contractBalances, activeWallet]);
+  }, [isLocked, selectedChain, wallets, contractBalances, activeWallet, selectedCurrency]);
+
+  // Settings Persistence Hooks
+  useEffect(() => {
+    boltStorage.setItem('selectedChain', selectedChain);
+  }, [selectedChain]);
+
+  useEffect(() => {
+    boltStorage.setItem('bolt_currency', selectedCurrency);
+  }, [selectedCurrency]);
+
+  useEffect(() => {
+    boltStorage.setItem('bolt_custom_colors', JSON.stringify(customColors));
+  }, [customColors]);
 
   const cycleTheme = () => {
     const nextIdx = (currentThemeIdx + 1) % THEMES.length;
@@ -248,6 +392,9 @@ const App = () => {
     core.getWallets().then(setWallets);
     core.listContracts().then(setContracts);
     setShowNetworks(false);
+    
+    // Persist to unified storage
+    boltStorage.setItem('selectedChain', chainId);
   };
 
   const handleSetupPassword = async () => {
@@ -255,9 +402,10 @@ const App = () => {
     if (password !== confirmPassword) return setPasswordError("Passwords do not match");
     
     setIsSending(true);
+    let sessionPhrase = '';
     try {
-      const mnemon = await core.setupVault(password);
-      setMnemonic(mnemon);
+      sessionPhrase = await core.setupVault(password);
+      setMnemonic(sessionPhrase);
       setIsLocked(false);
       setIsVaultPrepared(true);
       const initialWallet = await core.getWallets();
@@ -268,9 +416,9 @@ const App = () => {
     } finally {
       // Broadcast session to background
       // @ts-ignore
-      if (window.chrome?.runtime?.id) {
+      if (window.chrome?.runtime?.id && sessionPhrase) {
         // @ts-ignore
-        window.chrome.runtime.sendMessage({ type: 'BOLT_SET_SESSION', session: mnemonic });
+        window.chrome.runtime.sendMessage({ type: 'BOLT_SET_SESSION', session: sessionPhrase });
       }
       setIsSending(false);
     }
@@ -285,11 +433,15 @@ const App = () => {
       setWallets(loadedWallets);
       setPassword('');
 
+      // Get session phrase to broadcast
+      const sessionPhrase = await core.getSession();
+      setMnemonic(sessionPhrase || '');
+
       // Broadcast session to background
       // @ts-ignore
-      if (window.chrome?.runtime?.id) {
+      if (window.chrome?.runtime?.id && sessionPhrase) {
         // @ts-ignore
-        window.chrome.runtime.sendMessage({ type: 'BOLT_SET_SESSION', session: mnemon });
+        window.chrome.runtime.sendMessage({ type: 'BOLT_SET_SESSION', session: sessionPhrase });
       }
     } else {
       setPasswordError("Incorrect password");
@@ -311,9 +463,9 @@ const App = () => {
     }
   };
 
-  const handleResetVault = () => {
+  const handleResetVault = async () => {
     if (confirm("Are you sure you want to reset the vault? ALL data will be lost.")) {
-      localStorage.clear();
+      await boltStorage.clear();
       setWallets([]);
       setShowSettings(false);
       window.location.reload();
@@ -350,7 +502,11 @@ const App = () => {
       
       setShowConfirmSend(true);
       setSimulationStatus('success');
-      setEstimatedFee(`${estimates.average.speed.charAt(0).toUpperCase() + estimates.average.speed.slice(1)} · ~${(parseFloat(estimates.average.maxFee) * 21000 / 1e9).toFixed(5)}`);
+      if (estimates?.average?.speed) {
+        setEstimatedFee(`${estimates.average.speed.charAt(0).toUpperCase() + estimates.average.speed.slice(1)} · ~${(parseFloat(estimates.average.maxFee) * 21000 / 1e9).toFixed(5)}`);
+      } else {
+        setEstimatedFee("Standard · ~0.00010");
+      }
     } catch (err) {
       console.error("Gas fetch failed", err);
       // Fallback
@@ -519,7 +675,9 @@ const App = () => {
     alert('Address copied to clipboard!');
   };
 
-  const formatAddress = (addr: string) => {
+  const formatAddress = (addr: any) => {
+    if (!addr || typeof addr !== 'string') return '0x...';
+    if (addr.length < 10) return addr;
     return `${addr.substring(0, 6)}...${addr.substring(addr.length - 4)}`;
   };
 
@@ -680,42 +838,309 @@ const App = () => {
 
           {showSettings && (
             <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="absolute inset-0 z-[60] bg-bolt-dark/95 backdrop-blur-xl p-8 flex flex-col"
+              initial={{ opacity: 0, y: 50, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 50, scale: 0.95 }}
+              className="absolute inset-4 z-[70] bg-[#0A0B10]/98 backdrop-blur-3xl p-6 flex flex-col rounded-[40px] border border-white/10 shadow-[0_0_100px_rgba(0,0,0,0.8)]"
             >
-              <div className="flex justify-between items-center mb-10">
-                <h3 className="text-xl font-black tracking-tight" style={{ color: theme.primary }}>Vault Settings</h3>
+              <div className="flex justify-between items-center mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-2xl bg-white/5 border border-white/10" style={{ color: theme.primary }}>
+                    <Settings className="w-5 h-5" />
+                  </div>
+                  <h3 className="text-xl font-black tracking-tight text-white">Vault Configuration</h3>
+                </div>
                 <X className="w-6 h-6 text-gray-500 cursor-pointer hover:text-white transition-colors" onClick={() => setShowSettings(false)} />
               </div>
-              <div className="flex-1 space-y-8">
-                <div>
-                  <div className="flex justify-between items-center mb-4">
-                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Security Phrase</p>
-                    <button 
-                      onClick={async () => {
-                        if (!showMnemonicPlain && !mnemonic) {
-                          const mnemon = await core.getSession();
-                          setMnemonic(mnemon || '');
-                        }
-                        setShowMnemonicPlain(!showMnemonicPlain);
-                      }}
-                      className="flex items-center gap-2 p-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all group"
-                    >
-                      {showMnemonicPlain ? <EyeOff className="w-3.5 h-3.5 text-gray-400 group-hover:text-white" /> : <Eye className="w-3.5 h-3.5 text-gray-400 group-hover:text-white" />}
-                      <span className="text-[9px] font-black text-gray-500 group-hover:text-white uppercase tracking-widest">{showMnemonicPlain ? 'Hide' : 'Reveal'}</span>
-                    </button>
-                  </div>
-                  <div className={`p-6 rounded-3xl bg-white/5 border border-white/10 font-mono text-xs leading-relaxed text-center transition-all duration-300 ${!showMnemonicPlain ? 'blur-md select-none' : 'select-all'}`} style={{ color: theme.primary }}>
-                    {showMnemonicPlain ? mnemonic : '•••• •••• •••• •••• •••• •••• •••• •••• •••• •••• •••• ••••'}
-                  </div>
-                </div>
-                <div className="pt-8 border-t border-white/5">
-                   <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-4">Danger Zone</p>
-                   <Button variant="glass" className="w-full border-red-500/20 text-red-400 hover:bg-red-500/10 py-4" onClick={handleResetVault}>Reset Vault Data</Button>
-                </div>
+
+              {/* Settings Tabs */}
+              <div className="flex gap-2 p-1.5 bg-white/5 rounded-[22px] mb-8 relative z-10 border border-white/5">
+                {[
+                   { id: 'general', icon: ShieldCheck, label: 'Vault' },
+                   { id: 'appearance', icon: Palette, label: 'Look' },
+                   { id: 'currency', icon: Banknote, label: 'Cash' },
+                   { id: 'extension', icon: Cpu, label: 'Bolt' },
+                   { id: 'logs', icon: Terminal, label: 'Logs' }
+                ].filter(t => t.id !== 'extension' || isPopup).map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setSettingsTab(tab.id as any)}
+                    className={`flex-1 py-3 px-2 rounded-[18px] transition-all duration-500 flex flex-col items-center gap-1.5 relative group ${settingsTab === tab.id ? 'bg-white/10 shadow-[0_0_20px_rgba(255,255,255,0.05)]' : 'hover:bg-white/[0.03]'}`}
+                  >
+                    <tab.icon className={`w-4 h-4 transition-all duration-300 ${settingsTab === tab.id ? 'scale-110' : 'text-gray-500 group-hover:text-gray-300'}`} style={{ color: settingsTab === tab.id ? theme.primary : undefined }} />
+                    <span className={`text-[8px] font-black uppercase tracking-[0.2em] transition-all ${settingsTab === tab.id ? 'text-white' : 'text-gray-600 group-hover:text-gray-400'}`}>{tab.label}</span>
+                    {settingsTab === tab.id && (
+                       <motion.div layoutId="activeTab" className="absolute -bottom-1 w-1 h-1 rounded-full" style={{ backgroundColor: theme.primary, boxShadow: `0 0 10px ${theme.primary}` }} />
+                    )}
+                  </button>
+                ))}
               </div>
-              <div className="mt-auto">
-                 <Button onClick={() => setShowSettings(false)} className="w-full py-4" style={{ background: `linear-gradient(to right, ${theme.primary}, ${theme.secondary})` }}>Close Settings</Button>
+
+              <div className="flex-1 overflow-y-auto pr-1 space-y-6 scrollbar-hide">
+                {settingsTab === 'general' && (
+                  <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                    <div className="relative">
+                      <div className="flex justify-between items-center mb-4">
+                         <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">Security Phrase</p>
+                         <div className="px-2 py-0.5 rounded-md bg-green-500/10 border border-green-500/20 text-[7px] font-black text-green-500 uppercase tracking-widest">Encrypted</div>
+                      </div>
+                      
+                      <div className="p-8 rounded-[32px] bg-white/[0.03] border border-white/5 relative overflow-hidden group shadow-2xl">
+                        <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent pointer-events-none" />
+                        
+                        <div className={`grid grid-cols-3 gap-3 transition-all duration-700 ${!showMnemonicPlain ? 'blur-2xl opacity-20 scale-95 select-none' : 'opacity-100 scale-100'}`}>
+                          {(showMnemonicPlain ? (mnemonic || "word ".repeat(12)).split(' ') : Array(12).fill('••••')).map((word, i) => (
+                            <div key={i} className="bg-white/5 rounded-xl py-2.5 px-3 border border-white/5 flex flex-col items-center gap-1 group/word hover:bg-white/10 transition-all">
+                               <span className="text-[7px] font-black text-gray-700 uppercase">{i + 1}</span>
+                               <span className="text-[11px] font-black tracking-tight" style={{ color: theme.primary }}>{word}</span>
+                            </div>
+                          ))}
+                        </div>
+
+                        <button 
+                          onClick={async () => {
+                            if (!showMnemonicPlain && !mnemonic) {
+                              const mnemon = await core.getSession();
+                              setMnemonic(mnemon || '');
+                            }
+                            setShowMnemonicPlain(!showMnemonicPlain);
+                          }}
+                          className={`absolute inset-0 flex flex-col items-center justify-center transition-all duration-500 z-20 ${showMnemonicPlain ? 'opacity-0 pointer-events-none' : 'bg-black/40 backdrop-blur-md opacity-100'}`}
+                        >
+                           <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-3 shadow-2xl group-hover:scale-110 transition-transform">
+                              <Eye className="w-6 h-6 text-white" />
+                           </div>
+                           <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white">Reveal Vault Phrase</span>
+                        </button>
+                      </div>
+
+                      {showMnemonicPlain && (
+                         <div className="flex justify-center mt-4">
+                            <button onClick={() => setShowMnemonicPlain(false)} className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-all">
+                               <EyeOff className="w-3 h-3 text-gray-500" />
+                               <span className="text-[9px] font-black uppercase tracking-widest text-gray-500">Hide Phrase</span>
+                            </button>
+                         </div>
+                      )}
+                    </div>
+                    
+                    <div className="pt-8 border-t border-white/5">
+                        <div className="flex items-center gap-2 mb-4">
+                           <p className="text-[10px] font-black text-red-500/60 uppercase tracking-[0.3em]">Danger Zone</p>
+                           <div className="h-[1px] flex-1 bg-red-500/10" />
+                        </div>
+                        <Button 
+                          variant="glass" 
+                          className="w-full border-red-500/10 text-red-500/80 hover:text-red-400 hover:bg-red-500/10 py-5 rounded-[24px] text-[10px] font-black uppercase tracking-widest shadow-lg flex items-center justify-center gap-3 transition-all" 
+                          onClick={handleResetVault}
+                        >
+                           <Trash2 className="w-4 h-4 opacity-50" />
+                           Reset Vault Data
+                        </Button>
+                    </div>
+                  </div>
+                )}
+                {settingsTab === 'appearance' && (
+                  <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                    <div>
+                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em] mb-6">Master Themes</p>
+                      <div className="grid grid-cols-2 gap-4">
+                        {THEMES.map((t, idx) => (
+                          <motion.div 
+                            key={t.id}
+                            whileHover={{ y: -4, scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => setCurrentThemeIdx(idx)}
+                            className={`p-5 rounded-[28px] border-2 cursor-pointer transition-all flex flex-col items-center gap-4 relative overflow-hidden group ${currentThemeIdx === idx ? 'bg-white/10 border-white/20 shadow-2xl' : 'bg-white/5 border-transparent hover:bg-white/10'}`}
+                          >
+                            <div className="absolute top-0 right-0 w-16 h-16 blur-2xl rounded-full -mr-8 -mt-8 opacity-20" style={{ backgroundColor: t.primary }} />
+                            <div className="w-12 h-12 rounded-2xl shadow-2xl flex items-center justify-center transition-transform group-hover:rotate-12" style={{ background: `linear-gradient(135deg, ${t.primary}, ${t.secondary})` }}>
+                               <Palette className="w-6 h-6 text-white" />
+                            </div>
+                            <span className="text-[10px] font-black tracking-[0.2em] text-white uppercase">{t.name}</span>
+                          </motion.div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="pt-8 border-t border-white/5">
+                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em] mb-6">Engine Overrides</p>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between p-6 rounded-[24px] bg-white/[0.03] border border-white/5 group hover:bg-white/5 transition-all">
+                          <div className="flex items-center gap-4">
+                             <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: customColors.primary }} />
+                             <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Primary Core</span>
+                          </div>
+                          <input 
+                            type="color" 
+                            value={customColors.primary} 
+                            onChange={(e) => setCustomColors({ ...customColors, primary: e.target.value })}
+                            className="bg-transparent border-none w-10 h-10 cursor-pointer rounded-2xl overflow-hidden shadow-2xl"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between p-6 rounded-[24px] bg-white/[0.03] border border-white/5 group hover:bg-white/5 transition-all">
+                          <div className="flex items-center gap-4">
+                             <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: customColors.secondary }} />
+                             <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Accent Glow</span>
+                          </div>
+                          <input 
+                            type="color" 
+                            value={customColors.secondary} 
+                            onChange={(e) => setCustomColors({ ...customColors, secondary: e.target.value })}
+                            className="bg-transparent border-none w-10 h-10 cursor-pointer rounded-2xl overflow-hidden shadow-2xl"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {settingsTab === 'currency' && (
+                  <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                    <div>
+                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em] mb-6">Settlement Currency</p>
+                      <div className="grid grid-cols-1 gap-3">
+                        {[
+                          { id: 'USD', name: 'US Dollar', icon: '🇺🇸' },
+                          { id: 'EUR', name: 'Euro', icon: '🇪🇺' },
+                          { id: 'GBP', name: 'British Pound', icon: '🇬🇧' },
+                          { id: 'JPY', name: 'Japanese Yen', icon: '🇯🇵' },
+                          { id: 'CNY', name: 'Chinese Yuan', icon: '🇨🇳' },
+                          { id: 'BTC', name: 'Bitcoin', icon: '₿' },
+                          { id: 'ETH', name: 'Ethereum', icon: 'Ξ' }
+                        ].map(c => (
+                          <motion.div 
+                            key={c.id}
+                            whileHover={{ x: 4 }}
+                            onClick={() => setSelectedCurrency(c.id)}
+                            className={`p-5 rounded-[24px] border transition-all cursor-pointer flex items-center justify-between group ${selectedCurrency === c.id ? 'bg-white/10 border-white/20 shadow-xl' : 'bg-white/[0.03] border-transparent hover:bg-white/5'}`}
+                          >
+                            <div className="flex items-center gap-4">
+                               <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-xl shadow-inner group-hover:scale-110 transition-transform">
+                                  {c.icon}
+                               </div>
+                               <div>
+                                  <p className="text-xs font-black text-white">{c.name}</p>
+                                  <p className="text-[9px] font-bold text-gray-600 uppercase tracking-widest">{c.id}</p>
+                               </div>
+                            </div>
+                            {selectedCurrency === c.id && (
+                               <div className="w-6 h-6 rounded-full flex items-center justify-center bg-white/10" style={{ color: theme.primary }}>
+                                  <CheckCircle2 className="w-4 h-4" />
+                                </div>
+                            )}
+                          </motion.div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {settingsTab === 'logs' && (
+                  <div className="h-full flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-500">
+                    <div className="flex justify-between items-center mb-6">
+                      <div className="flex items-center gap-3">
+                         <Activity className="w-4 h-4 text-gray-500 animate-pulse" />
+                         <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">Telemetry Stream</p>
+                      </div>
+                      <div className="flex gap-4">
+                         <button onClick={() => setLogs([])} className="text-[9px] font-black text-red-500/60 uppercase tracking-widest hover:text-red-400 transition-colors">Wipe Console</button>
+                         <button className="text-[9px] font-black text-blue-500/60 uppercase tracking-widest hover:text-blue-400 transition-colors flex items-center gap-1.5">
+                            <Download className="w-3 h-3" />
+                            Export
+                         </button>
+                      </div>
+                    </div>
+                    <div className="flex-1 bg-[#050608] rounded-[32px] border border-white/5 p-6 font-mono text-[9px] overflow-y-auto space-y-4 min-h-[400px] shadow-inner scrollbar-hide">
+                      {!logs || logs.length === 0 ? (
+                        <div className="h-full flex flex-col items-center justify-center opacity-10 gap-4">
+                           <RefreshCw className="w-10 h-10 animate-spin-slow" />
+                           <p className="uppercase tracking-[0.5em] font-black text-xs">Awaiting Network Events...</p>
+                        </div>
+                      ) : (
+                        (logs || []).slice().reverse().map(log => (
+                          <div key={log?.id || Math.random().toString()} className="border-b border-white/[0.02] pb-4 last:border-0 group/log">
+                            <div className="flex items-center gap-3 mb-2">
+                               <span className={`px-2 py-0.5 rounded-lg text-[7px] font-black uppercase tracking-widest shadow-lg ${
+                                 log?.status === 'error' ? 'bg-red-500/20 text-red-400 border border-red-500/20' : 
+                                 log?.status === 'warning' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/20' : 
+                                 log?.status === 'success' ? 'bg-green-500/20 text-green-400 border border-green-500/20' : 
+                                 'bg-blue-500/20 text-blue-400 border border-blue-500/20'
+                               }`}>
+                                 {log?.type || 'event'}
+                               </span>
+                               <span className="text-gray-700 text-[8px] font-black italic">{log?.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '...'}</span>
+                               <div className="h-[1px] flex-1 bg-white/[0.02] group-hover/log:bg-white/[0.05] transition-colors" />
+                            </div>
+                            <p className="text-gray-400 leading-relaxed pl-1">{log?.message || 'Empty Log Message'}</p>
+                            {log?.metadata && (
+                              <pre className="text-[7px] text-gray-600 mt-3 bg-white/[0.02] p-4 rounded-2xl overflow-x-auto border border-white/[0.02] group-hover/log:border-white/[0.05] transition-all">
+                                {JSON.stringify(log.metadata, null, 2)}
+                              </pre>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {settingsTab === 'extension' && isPopup && (
+                  <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                    <section>
+                      <div className="flex items-center gap-3 mb-6">
+                        <Shield className="w-4 h-4 text-gray-400" />
+                        <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">Session Security</p>
+                      </div>
+                      <div className="space-y-4">
+                        <div className="p-6 rounded-[28px] bg-white/[0.03] border border-white/5 space-y-4 hover:bg-white/10 transition-all">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Auto-Lock Timer</span>
+                            <span className="text-[11px] font-black" style={{ color: theme.primary }}>{sessionTimeout} Minutes</span>
+                          </div>
+                          <input 
+                            type="range" min="5" max="60" step="5"
+                            value={sessionTimeout}
+                            onChange={(e) => setSessionTimeout(parseInt(e.target.value))}
+                            className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-current" 
+                            style={{ color: theme.primary }}
+                          />
+                          <div className="flex justify-between text-[7px] font-black text-gray-600 uppercase">
+                            <span>5m</span>
+                            <span>15m</span>
+                            <span>30m</span>
+                            <span>60m</span>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="pt-8 border-t border-white/5">
+                      <div className="flex items-center gap-3 mb-6">
+                        <Activity className="w-4 h-4 text-gray-400" />
+                        <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">Telemetry & Verbosity</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                         <button 
+                           onClick={() => setLogVerbosity('compact')}
+                           className={`p-5 rounded-[24px] border transition-all flex flex-col gap-2 ${logVerbosity === 'compact' ? 'bg-white/10 border-white/20' : 'bg-white/5 border-transparent opacity-40 hover:opacity-100'}`}
+                         >
+                            <span className="text-[10px] font-black text-white uppercase tracking-widest text-left">Compact</span>
+                            <span className="text-[8px] text-gray-500 text-left">Summary only</span>
+                         </button>
+                         <button 
+                           onClick={() => setLogVerbosity('verbose')}
+                           className={`p-5 rounded-[24px] border transition-all flex flex-col gap-2 ${logVerbosity === 'verbose' ? 'bg-white/10 border-white/20 shadow-lg shadow-black/20' : 'bg-white/5 border-transparent opacity-40 hover:opacity-100'}`}
+                         >
+                            <span className="text-[10px] font-black text-white uppercase tracking-widest text-left" style={{ color: logVerbosity === 'verbose' ? theme.primary : undefined }}>Verbose</span>
+                            <span className="text-[8px] text-gray-500 text-left">Full RPC meta</span>
+                         </button>
+                      </div>
+                    </section>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-6 pt-6 border-t border-white/5">
+                 <Button onClick={() => setShowSettings(false)} className="w-full py-4 rounded-3xl font-black uppercase tracking-widest text-[10px]" style={{ background: `linear-gradient(to right, ${theme.primary}, ${theme.secondary})` }}>Done</Button>
               </div>
             </motion.div>
           )}
@@ -1380,7 +1805,7 @@ const App = () => {
           <div className="flex justify-between items-start mb-6">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: theme.primary }}>Total Assets</p>
-              <h2 className="text-3xl font-black text-white leading-none">${totalUSD}</h2>
+              <h2 className="text-3xl font-black text-white leading-none">{totalUSD}</h2>
             </div>
             <div className="p-3 rounded-2xl border transition-all cursor-pointer hover:rotate-12" style={{ backgroundColor: `${theme.primary}10`, borderColor: `${theme.primary}30` }} onClick={() => setShowNetworks(true)}>
               <Fingerprint className="w-6 h-6" style={{ color: theme.primary }} />
@@ -1682,22 +2107,24 @@ const App = () => {
                         )}
                       </div>
                       {passwordError && <p className="text-red-500 text-[10px] font-black uppercase tracking-widest">{passwordError}</p>}
+                      {isVaultPrepared && (
+                        <div className="flex justify-center mb-4">
+                          <button 
+                            onClick={() => setShowRecovery(true)}
+                            className="text-[11px] font-bold uppercase text-white hover:text-blue-400 transition-all tracking-[0.2em] border-b border-white/40 hover:border-blue-400/40 pb-1"
+                          >
+                            Forgot Password? Use Recovery Phrase
+                          </button>
+                        </div>
+                      )}
+
                       <Button 
                         onClick={isVaultPrepared ? handleUnlock : handleSetupPassword}
-                        className="w-full py-6 rounded-2xl font-black uppercase tracking-[0.2em]"
-                        style={{ background: `linear-gradient(135deg, ${theme.primary}, ${theme.secondary})` }}
+                        disabled={isSending || !password}
+                        className="w-full h-14 text-lg font-black tracking-widest bg-gradient-to-r from-bolt-blue to-bolt-purple hover:scale-[1.02] active:scale-[0.98] transition-all relative overflow-hidden group shadow-[0_0_20px_rgba(0,209,255,0.2)] disabled:opacity-50 disabled:grayscale"
                       >
                         {isSending ? 'Authenticating...' : (isVaultPrepared ? 'Unlock' : 'Begin Setup')}
                       </Button>
-                      
-                      {isVaultPrepared && (
-                        <button 
-                          onClick={() => setShowRecovery(true)}
-                          className="w-full py-2 text-[10px] font-black uppercase text-gray-500 hover:text-white transition-colors tracking-widest mt-2"
-                        >
-                          Forgot Password? Use Recovery Phrase
-                        </button>
-                      )}
                     </>
                   ) : (
                     <div className="space-y-6">
@@ -1720,21 +2147,38 @@ const App = () => {
                           ))}
                        </div>
                        
-                       <div className="space-y-2">
-                          <input 
-                            type="password"
-                            placeholder="New Master Password"
-                            value={recoveryPassword}
-                            onChange={(e) => setRecoveryPassword(e.target.value)}
-                            className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-8 text-xs font-bold text-white placeholder:text-gray-500 outline-none focus:bg-white/10 transition-all"
-                          />
-                          <input 
-                            type="password"
-                            placeholder="Confirm New Password"
-                            value={recoveryConfirmPassword}
-                            onChange={(e) => setRecoveryConfirmPassword(e.target.value)}
-                            className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 px-8 text-xs font-bold text-white placeholder:text-gray-500 outline-none focus:bg-white/10 transition-all"
-                          />
+                       <div className="space-y-3">
+                          <div className="relative">
+                            <input 
+                              type={showPassword ? "text" : "password"}
+                              placeholder="New Master Password"
+                              value={recoveryPassword}
+                              onChange={(e) => setRecoveryPassword(e.target.value)}
+                              className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 px-8 text-sm font-bold text-white placeholder:text-gray-600 outline-none focus:bg-white/10 transition-all shadow-inner"
+                            />
+                            <button 
+                              onClick={() => setShowPassword(!showPassword)}
+                              className="absolute right-6 top-1/2 -translate-y-1/2 text-gray-600 hover:text-white transition-colors"
+                            >
+                              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
+                          
+                          <div className="relative">
+                            <input 
+                              type={showPassword ? "text" : "password"}
+                              placeholder="Confirm New Password"
+                              value={recoveryConfirmPassword}
+                              onChange={(e) => setRecoveryConfirmPassword(e.target.value)}
+                              className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 px-8 text-sm font-bold text-white placeholder:text-gray-600 outline-none focus:bg-white/10 transition-all shadow-inner"
+                            />
+                            <button 
+                              onClick={() => setShowPassword(!showPassword)}
+                              className="absolute right-6 top-1/2 -translate-y-1/2 text-gray-600 hover:text-white transition-colors"
+                            >
+                              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
                        </div>
 
                        {recoveryError && <p className="text-red-500 text-[10px] font-black uppercase tracking-widest leading-relaxed">{recoveryError}</p>}

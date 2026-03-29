@@ -29,6 +29,7 @@ Thumbs.db
 # Extension keys
 *.pem
 key.pem
+apps/extension/src/secrets.ts
 
 # Logs
 npm-debug.log*

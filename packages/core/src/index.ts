@@ -42,8 +42,14 @@ import {
   setSessionMnemonic as owsSetSessionMnemonic,
   // @ts-ignore
   getSessionMnemonic as owsGetSessionMnemonic,
+  // @ts-ignore
+  onLogs as owsOnLogs,
+  // @ts-ignore
+  getLogs as owsGetLogs,
   WalletInfo,
-  SignResult
+  SignResult,
+  // @ts-ignore
+  LogEvent
 } from "@open-wallet-standard/core";
 import { CHAINS, ChainConfig } from "./chains";
 export { CHAINS };
@@ -234,4 +240,19 @@ export class BoltwalletCore {
     const history = await owsGetHistory(address, chainId);
     return history as HistoryData[];
   }
+
+  onLogs(cb: (logs: any[]) => void) {
+    if (typeof owsOnLogs === 'function') {
+      return owsOnLogs(cb);
+    }
+  }
+
+  getLogs() {
+    if (typeof owsGetLogs === 'function') {
+      return owsGetLogs();
+    }
+    return [];
+  }
 }
+
+export type { LogEvent };

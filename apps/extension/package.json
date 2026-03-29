@@ -1,0 +1,12 @@
+{
+  "name": "@boltwallet/extension",
+  "version": "1.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "powershell -ExecutionPolicy Bypass -File ../../scripts/sync-extension.ps1"
+  },
+  "dependencies": {
+    "@boltwallet/web": "workspace:*"
+  }
+}
