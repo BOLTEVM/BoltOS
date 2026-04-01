@@ -35,12 +35,15 @@ import {
   Banknote,
   Terminal,
   Download,
-  Activity
+  Activity,
+  ArrowDown
 } from 'lucide-react';
 import { Button } from '@boltwallet/ui';
 import { NetworkIcon } from './components/NetworkIcons';
 import { WalletData, ContractData, NFTData, CHAINS, HistoryData, LogEvent, BoltwalletCore } from './ows/ows-core';
 import { ethers } from 'ethers';
+import { Html5QrcodeScanner } from 'html5-qrcode';
+import { QRCodeSVG } from 'qrcode.react';
 
 const core = new BoltwalletCore() as any;
 
@@ -80,11 +83,34 @@ const THEMES = [
   { id: 'bolt', primary: '#00D1FF', secondary: '#4F46E5', name: 'BOLT' },
   { id: 'cyber', primary: '#39FF14', secondary: '#BC13FE', name: 'CYBER' },
   { id: 'royal', primary: '#FFD700', secondary: '#FF0000', name: 'ROYAL' },
-  { id: 'mono', primary: '#FFFFFF', secondary: '#444444', name: 'VAULT' }
+  { id: 'mono', primary: '#FFFFFF', secondary: '#444444', name: 'VAULT' },
+  { id: 'glossy', primary: '#8338EC', secondary: '#00D1FF', name: 'GLOSSY' }
 ];
 
 const ERC20_ABI = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"},{"constant":false,"inputs":[{"name":"_to","type":"address"},{"name":"_value","type":"uint256"}],"name":"transfer","outputs":[{"name":"success","type":"bool"}],"type":"function"},{"constant":true,"inputs":[],"name":"decimals","outputs":[{"name":"","type":"uint8"}],"type":"function"},{"constant":true,"inputs":[],"name":"name","outputs":[{"name":"","type":"string"}],"type":"function"},{"constant":true,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"type":"function"}]';
 const ERC721_ABI = '[{"constant":true,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"count","type":"uint256"}],"type":"function"},{"constant":true,"inputs":[{"name":"_tokenId","type":"uint256"}],"name":"ownerOf","outputs":[{"name":"owner","type":"address"}],"type":"function"},{"constant":false,"inputs":[{"name":"_from","type":"address"},{"name":"_to","type":"address"},{"name":"_tokenId","type":"uint256"}],"name":"safeTransferFrom","outputs":[],"type":"function"},{"constant":true,"inputs":[{"name":"_tokenId","type":"uint256"}],"name":"tokenURI","outputs":[{"name":"","type":"string"}],"type":"function"},{"constant":true,"inputs":[],"name":"name","outputs":[{"name":"","type":"string"}],"type":"function"},{"constant":true,"inputs":[],"name":"symbol","outputs":[{"name":"","type":"string"}],"type":"function"}]';
+
+const QRScannerOverlay = ({ onScan, onClose }: { onScan: (text: string) => void, onClose: () => void }) => {
+  useEffect(() => {
+    const scanner = new Html5QrcodeScanner("qr-reader", { fps: 10, qrbox: 250 }, false);
+    scanner.render((text) => {
+      onScan(text);
+      scanner.clear();
+      onClose();
+    }, (err) => {});
+    return () => { scanner.clear().catch(e => {}); };
+  }, []);
+ 
+  return (
+    <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-3xl flex flex-col items-center justify-center p-6">
+      <div className="relative w-full max-w-sm aspect-square bg-white/5 rounded-3xl border border-white/10 overflow-hidden shadow-2xl">
+        <div id="qr-reader" className="w-full h-full" />
+        <div className="absolute inset-0 border-2 border-bolt-blue/50 pointer-events-none rounded-3xl animate-pulse" />
+      </div>
+      <button onClick={onClose} className="mt-8 px-8 py-3 rounded-2xl bg-white/10 border border-white/10 text-white font-black uppercase tracking-widest text-xs hover:bg-white/20 transition-all">Close Scanner</button>
+    </div>
+  );
+};
 
 const App = () => {
   const [selectedChain, setSelectedChain] = useState('ethereum');
@@ -162,6 +188,16 @@ const App = () => {
   const [recoveryPassword, setRecoveryPassword] = useState('');
   const [recoveryConfirmPassword, setRecoveryConfirmPassword] = useState('');
   const [recoveryError, setRecoveryError] = useState('');
+  const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
+  const [isResolvingENS, setIsResolvingENS] = useState(false);
+  const [showQRScanner, setShowQRScanner] = useState(false);
+  const [showReceiveModal, setShowReceiveModal] = useState(false);
+  const [showSwap, setShowSwap] = useState(false);
+  const [swapFromAsset, setSwapFromAsset] = useState('MON');
+  const [swapToAsset, setSwapToAsset] = useState('USDC');
+  const [swapAmount, setSwapAmount] = useState('');
+  const [swapQuote, setSwapQuote] = useState<any>(null);
+  const [isSwapping, setIsSwapping] = useState(false);
 
   const theme = THEMES[currentThemeIdx];
 
@@ -386,6 +422,28 @@ const App = () => {
     localStorage.setItem('bolt_theme_id', THEMES[nextIdx].id);
   };
 
+  useEffect(() => {
+    const resolveENS = async () => {
+      if (recipient.includes('.')) {
+        setIsResolvingENS(true);
+        try {
+          const address = await core.resolveName(recipient);
+          setResolvedAddress(address);
+        } catch (err) {
+          console.error("ENS Error:", err);
+          setResolvedAddress(null);
+        } finally {
+          setIsResolvingENS(false);
+        }
+      } else {
+        setResolvedAddress(null);
+      }
+    };
+ 
+    const timer = setTimeout(resolveENS, 500);
+    return () => clearTimeout(timer);
+  }, [recipient]);
+
   const handleChainChange = (chainId: string) => {
     setSelectedChain(chainId);
     core.setChain(chainId);
@@ -474,7 +532,10 @@ const App = () => {
 
   const handleSend = async () => {
     if (!recipient || !amount || !activeWallet) return;
-    if (!ethers.isAddress(recipient || '') && !(recipient as string).includes('.')) {
+    
+    // Use resolved address if available, otherwise use original recipient
+    const finalRecipient = resolvedAddress || recipient;
+    if (!ethers.isAddress(finalRecipient || '') && !(finalRecipient as string).includes('.')) {
       alert("Invalid recipient address or ENS");
       return;
     }
@@ -491,7 +552,7 @@ const App = () => {
       });
       
       setProposedTx({
-        to: recipient,
+        to: finalRecipient,
         value: amount,
         from: activeWallet.address,
         maxFeePerGas: ethers.parseUnits(estimates.average.maxFee, 'gwei').toString(),
@@ -547,6 +608,37 @@ const App = () => {
     setEstimatedFee(`Custom · ~${(parseFloat(customValues.maxFee) * parseInt(customValues.gasLimit) / 1e9).toFixed(5)}`);
     setShowCustomGasModal(false);
     setShowGasModal(false);
+  };
+
+  const handleGetSwapQuote = async () => {
+    if (!swapAmount || isNaN(parseFloat(swapAmount))) return;
+    try {
+      const quote = await core.getSwapQuote(swapFromAsset, swapToAsset, swapAmount);
+      setSwapQuote(quote);
+    } catch (err) {
+      console.error("Quote Error:", err);
+    }
+  };
+
+  const handleExecuteSwap = async () => {
+    if (!activeWallet || !swapQuote) return;
+    setIsSwapping(true);
+    try {
+      const hash = await core.executeSwap(activeWallet.id, {
+        fromAsset: swapFromAsset,
+        toAsset: swapToAsset,
+        fromAmount: swapAmount,
+        ...swapQuote
+      });
+      alert(`Swap Successful! Hash: ${hash}`);
+      setShowSwap(false);
+      setSwapQuote(null);
+      setSwapAmount('');
+    } catch (err) {
+      alert(`Swap Failed: ${err}`);
+    } finally {
+      setIsSwapping(false);
+    }
   };
 
   const handleRecovery = async () => {
@@ -681,10 +773,16 @@ const App = () => {
     return `${addr.substring(0, 6)}...${addr.substring(addr.length - 4)}`;
   };
 
-  const themeStyles = {
+
+  const themeStyles = theme.id === 'glossy' ? {
     '--theme-primary': theme.primary,
     '--theme-secondary': theme.secondary,
-  } as React.CSSProperties;
+    'background': '#07080A',
+    'color': '#FFFFFF'
+  } : {
+    '--theme-primary': theme.primary,
+    '--theme-secondary': theme.secondary
+  };
 
   if (isPopup) {
     return (
@@ -1190,12 +1288,21 @@ const App = () => {
                 {/* Form Sections with Glassmorphism */}
                 <div className="space-y-4 flex-1 overflow-y-auto scrollbar-hide pr-1 pb-4">
                   {/* Recipient Input Card */}
-                  <div className="p-5 rounded-[28px] bg-white/5 border border-white/5 focus-within:bg-white/10 focus-within:border-white/10 transition-all flex flex-col gap-2 group shadow-xl">
+                  <div className="p-5 rounded-[28px] bg-white/5 border border-white/5 focus-within:bg-white/10 focus-within:border-white/10 transition-all flex flex-col gap-2 group shadow-xl relative">
                     <div className="flex items-center justify-between">
                       <div className="w-10 h-10 rounded-2xl bg-white/5 flex items-center justify-center mb-1 group-focus-within:scale-105 transition-transform" style={{ color: theme.primary }}>
                         <User className="w-5 h-5" />
                       </div>
-                      <Users className="w-5 h-5 text-gray-500 cursor-pointer hover:text-white transition-colors" />
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => setShowQRScanner(true)}
+                          className="w-10 h-10 rounded-2xl bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors"
+                          title="Scan QR Code"
+                        >
+                          <Zap className="w-5 h-5 text-bolt-blue" />
+                        </button>
+                        <Users className="w-5 h-5 text-gray-500 cursor-pointer hover:text-white transition-colors self-center" />
+                      </div>
                     </div>
                     <input 
                       type="text" 
@@ -1204,7 +1311,19 @@ const App = () => {
                       onChange={(e) => setRecipient(e.target.value)}
                       className="bg-transparent text-lg font-bold text-white placeholder:text-white/10 outline-none w-full tracking-tight" 
                     />
-                    <span className="text-[8px] text-gray-500 font-mono uppercase tracking-[0.2em] opacity-50">0x0000...</span>
+                    <div className="flex justify-between items-center h-4">
+                      {isResolvingENS ? (
+                        <span className="text-[8px] text-bolt-blue font-black uppercase tracking-widest animate-pulse">Resolving ENS...</span>
+                      ) : resolvedAddress ? (
+                        <span className="text-[8px] text-green-500 font-black uppercase tracking-widest">
+                          Resolved: {formatAddress(resolvedAddress)}
+                        </span>
+                      ) : recipient.includes('.') && !isResolvingENS ? (
+                        <span className="text-[8px] text-red-500 font-black uppercase tracking-widest">Unresolved Domain</span>
+                      ) : (
+                        <span className="text-[8px] text-gray-500 font-mono uppercase tracking-[0.2em] opacity-50">0x0000...</span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Asset Selection Card */}
@@ -1510,117 +1629,250 @@ const App = () => {
                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                className="absolute inset-0 z-[80] bg-[#0A0B0E]/98 backdrop-blur-[60px] flex flex-col items-center justify-center p-8 text-center overflow-hidden"
             >
-              {/* Animated Background Glows */}
-              <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                 <motion.div 
-                   animate={{ scale: [1, 1.2, 1], opacity: [0.1, 0.2, 0.1] }}
-                   transition={{ duration: 4, repeat: Infinity }}
-                   className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] rounded-full blur-[120px]"
-                   style={{ background: txStatus === 'success' ? 'rgba(34,197,94,0.15)' : `${theme.primary}25` }}
-                 />
-              </div>
-
-              <div className="flex-1 flex flex-col items-center justify-center w-full relative z-10">
-                {txStatus === 'transferring' ? (
-                  <>
-                    <div className="flex items-center gap-16 mb-16 relative">
-                       {/* Connection Line */}
-                       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-[1px] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-                       
-                       <motion.div 
-                         animate={{ y: [0, -5, 0] }}
-                         transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-                         className="w-24 h-24 rounded-[32px] bg-white/[0.03] border border-white/10 flex items-center justify-center shadow-[0_0_50px_rgba(0,0,0,0.5)] backdrop-blur-xl relative group"
-                       >
-                          <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent rounded-[32px]" />
-                          <div className="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-2xl shadow-inner relative z-10" style={{ background: `linear-gradient(135deg, ${theme.primary}, ${theme.secondary})` }}>
-                             {activeWallet?.name.match(/\d+/)?.[0] || '1'}
-                          </div>
-                       </motion.div>
-                       
-                       <div className="flex flex-col items-center gap-1 relative">
+               {/* Animated Background Glows */}
+               <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                  <motion.div 
+                    animate={{ scale: [1, 1.2, 1], opacity: [0.1, 0.2, 0.1] }}
+                    transition={{ duration: 4, repeat: Infinity }}
+                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] rounded-full blur-[120px]"
+                    style={{ background: txStatus === 'success' ? 'rgba(34,197,94,0.15)' : `${theme.primary}25` }}
+                  />
+               </div>
+ 
+               <div className="flex-1 flex flex-col items-center justify-center w-full relative z-10">
+                 {txStatus === 'transferring' ? (
+                   <>
+                     <div className="flex items-center gap-16 mb-16 relative">
+                        {/* Connection Line */}
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-[1px] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                        
+                        <motion.div 
+                          animate={{ y: [0, -5, 0] }}
+                          transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+                          className="w-24 h-24 rounded-[32px] bg-white/[0.03] border border-white/10 flex items-center justify-center shadow-[0_0_50px_rgba(0,0,0,0.5)] backdrop-blur-xl relative group"
+                        >
+                           <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent rounded-[32px]" />
+                           <div className="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-2xl shadow-inner relative z-10" style={{ background: `linear-gradient(135deg, ${theme.primary}, ${theme.secondary})` }}>
+                              {activeWallet?.name.match(/\d+/)?.[0] || '1'}
+                           </div>
+                        </motion.div>
+                        
+                        <div className="flex flex-col items-center gap-1 relative">
+                           <motion.div 
+                             animate={{ x: [-10, 10, -10], opacity: [0.2, 1, 0.2] }}
+                             transition={{ duration: 2, repeat: Infinity }}
+                             className="flex gap-1"
+                           >
+                              {[1, 2, 3].map(i => <div key={i} className="w-1.5 h-1.5 rounded-full bg-white/20" />)}
+                           </motion.div>
+                        </div>
+ 
+                        <motion.div 
+                          animate={{ y: [0, 5, 0] }}
+                          transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
+                          className="w-24 h-24 rounded-[32px] bg-white/[0.03] border border-white/10 flex items-center justify-center shadow-[0_0_50px_rgba(0,0,0,0.5)] backdrop-blur-xl relative"
+                        >
+                           <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent rounded-[32px]" />
+                           <div className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center relative z-10">
+                              <User className="w-8 h-8 text-white/20" />
+                           </div>
+                        </motion.div>
+                     </div>
+                     <h2 className="text-4xl font-black text-white tracking-tighter mb-4">Transferring...</h2>
+                     <p className="text-gray-500 text-xs font-bold uppercase tracking-[0.3em] opacity-40 animate-pulse">Broadcasting to {chains.find(c => c.id === selectedChain)?.name}</p>
+                   </>
+                 ) : txStatus === 'success' ? (
+                   <>
+                     <motion.div 
+                       initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                       className="w-40 h-40 rounded-full flex items-center justify-center mb-12 relative"
+                     >
+                        <div className="absolute inset-0 bg-green-500/20 blur-[60px] rounded-full" />
+                        <div className="w-32 h-32 rounded-full bg-green-500 flex items-center justify-center shadow-2xl relative z-10">
+                           <CheckCircle2 className="w-16 h-16 text-white" strokeWidth={3} />
+                        </div>
+                        {[...Array(3)].map((_, i) => (
                           <motion.div 
-                            animate={{ x: [-10, 10, -10], opacity: [0.2, 1, 0.2] }}
-                            transition={{ duration: 2, repeat: Infinity }}
-                            className="flex gap-1"
-                          >
-                             {[1, 2, 3].map(i => <div key={i} className="w-1.5 h-1.5 rounded-full bg-white/20" />)}
-                          </motion.div>
-                       </div>
-
-                       <motion.div 
-                         animate={{ y: [0, 5, 0] }}
-                         transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
-                         className="w-24 h-24 rounded-[32px] bg-white/[0.03] border border-white/10 flex items-center justify-center shadow-[0_0_50px_rgba(0,0,0,0.5)] backdrop-blur-xl relative"
-                       >
-                          <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent rounded-[32px]" />
-                          <div className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center relative z-10">
-                             <User className="w-8 h-8 text-white/20" />
-                          </div>
-                       </motion.div>
-                    </div>
-                    <h2 className="text-4xl font-black text-white tracking-tighter mb-4">Transferring...</h2>
-                    <p className="text-gray-500 text-xs font-bold uppercase tracking-[0.3em] opacity-40 animate-pulse">Broadcasting to {chains.find(c => c.id === selectedChain)?.name}</p>
-                  </>
-                ) : txStatus === 'success' ? (
-                  <>
-                    <motion.div 
-                      initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-                      className="w-40 h-40 rounded-full flex items-center justify-center mb-12 relative"
-                    >
-                       <div className="absolute inset-0 bg-green-500/20 blur-[60px] rounded-full" />
-                       <div className="w-32 h-32 rounded-full bg-green-500 flex items-center justify-center shadow-2xl relative z-10">
-                          <CheckCircle2 className="w-16 h-16 text-white" strokeWidth={3} />
-                       </div>
-                       {[...Array(3)].map((_, i) => (
-                         <motion.div 
-                           key={i}
-                           initial={{ scale: 1, opacity: 0.5 }}
-                           animate={{ scale: 2, opacity: 0 }}
-                           transition={{ duration: 2, repeat: Infinity, delay: i * 0.6 }}
-                           className="absolute inset-0 rounded-full border-2 border-green-500/30"
-                         />
-                       ))}
-                    </motion.div>
-                    <h2 className="text-6xl font-black text-white tracking-tighter mb-4">Done</h2>
-                    <div className="flex flex-col items-center gap-4">
-                       <a 
-                         href={`${CHAINS[selectedChain]?.explorer}/tx/${txHash}`} 
-                         target="_blank" rel="noreferrer" 
-                         className="px-6 py-2 rounded-full bg-white/5 border border-white/10 text-xs font-black text-blue-400 hover:bg-white/10 transition-all flex items-center gap-2 group uppercase tracking-widest"
-                       >
-                          View In Explorer <ExternalLink className="w-3 h-3" />
-                       </a>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="w-24 h-24 rounded-full bg-red-500/10 border-2 border-red-500/30 flex items-center justify-center mb-8">
-                       <X className="w-12 h-12 text-red-500" />
-                    </div>
-                    <h2 className="text-3xl font-black text-white tracking-tighter mb-4">Failed</h2>
-                    <p className="text-gray-500 text-sm mb-8 px-12">The transaction could not be broadcasted to the network. Please check your connection and try again.</p>
-                  </>
-                )}
-              </div>
-
-              <div className="w-full pt-12 border-t border-white/5 relative z-10">
-                 <Button 
-                   onClick={() => {
-                     setTxStatus('idle');
-                     setShowConfirmSend(false);
-                     setShowSend(false);
-                     setRecipient('');
-                     setAmount('');
-                   }}
-                   disabled={txStatus === 'transferring'}
-                   className="w-full py-5 rounded-[24px] bg-white/5 border border-white/10 hover:bg-white/10 transition-all text-sm font-black text-white shadow-xl disabled:opacity-20 uppercase tracking-[0.2em]"
-                 >
-                   Return to Vault
-                 </Button>
-              </div>
+                            key={i}
+                            initial={{ scale: 1, opacity: 0.5 }}
+                            animate={{ scale: 2, opacity: 0 }}
+                            transition={{ duration: 2, repeat: Infinity, delay: i * 0.6 }}
+                            className="absolute inset-0 rounded-full border-2 border-green-500/30"
+                          />
+                        ))}
+                     </motion.div>
+                     <h2 className="text-6xl font-black text-white tracking-tighter mb-4">Done</h2>
+                     <div className="flex flex-col items-center gap-4">
+                        <a 
+                          href={`${CHAINS[selectedChain]?.explorer}/tx/${txHash}`} 
+                          target="_blank" rel="noreferrer" 
+                          className="px-6 py-2 rounded-full bg-white/5 border border-white/10 text-xs font-black text-blue-400 hover:bg-white/10 transition-all flex items-center gap-2 group uppercase tracking-widest"
+                        >
+                           View In Explorer <ExternalLink className="w-3 h-3" />
+                        </a>
+                     </div>
+                   </>
+                 ) : (
+                   <>
+                     <div className="w-24 h-24 rounded-full bg-red-500/10 border-2 border-red-500/30 flex items-center justify-center mb-8">
+                        <X className="w-12 h-12 text-red-500" />
+                     </div>
+                     <h2 className="text-3xl font-black text-white tracking-tighter mb-4">Failed</h2>
+                     <p className="text-gray-500 text-sm mb-8 px-12">The transaction could not be broadcasted to the network. Please check your connection and try again.</p>
+                     <Button 
+                        onClick={() => setTxStatus('idle')}
+                        className="px-12 py-4 rounded-2xl bg-white/5 border border-white/10 text-white font-black uppercase text-xs"
+                      >
+                        Try Again
+                      </Button>
+                   </>
+                 )}
+               </div>
             </motion.div>
           )}
+ 
+          {showQRScanner && (
+            <QRScannerOverlay 
+              onScan={(text) => setRecipient(text)} 
+              onClose={() => setShowQRScanner(false)} 
+            />
+          )}
+ 
+          {showReceiveModal && activeWallet && (
+            <motion.div 
+               initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
+               className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-xl flex items-center justify-center p-6"
+            >
+               <motion.div className="w-full max-w-sm bg-bolt-dark/95 rounded-[40px] border border-white/10 p-8 flex flex-col items-center gap-8 shadow-2xl relative">
+                  <button onClick={() => setShowReceiveModal(false)} className="absolute top-6 right-6 p-2 rounded-full bg-white/5 hover:bg-white/10 transition-all">
+                    <X className="w-6 h-6 text-gray-500" />
+                  </button>
+ 
+                  <div className="text-center">
+                    <h3 className="text-2xl font-black text-white tracking-tight mb-2">Receive Assets</h3>
+                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">Your unique vault address</p>
+                  </div>
+ 
+                  <div className="p-4 bg-white rounded-[32px] shadow-[0_0_50px_rgba(255,255,255,0.1)]">
+                    <QRCodeSVG 
+                      value={activeWallet.address} 
+                      size={200}
+                      bgColor={"#ffffff"}
+                      fgColor={"#000000"}
+                      level={"L"}
+                      includeMargin={false}
+                    />
+                  </div>
+ 
+                  <div className="w-full space-y-4">
+                    <div 
+                      onClick={() => copyAddress(activeWallet.address)}
+                      className="w-full p-6 rounded-[24px] bg-white/5 border border-white/5 hover:bg-white/10 transition-all cursor-pointer group flex flex-col items-center gap-1"
+                    >
+                      <p className="text-[10px] font-black text-gray-600 uppercase tracking-widest">{activeWallet.name}</p>
+                      <p className="text-sm font-mono font-bold text-white group-hover:text-bolt-blue transition-colors">{activeWallet.address}</p>
+                      <div className="flex items-center gap-2 mt-4 text-[10px] font-black uppercase tracking-widest text-bolt-blue opacity-0 group-hover:opacity-100 transition-all">
+                        <Copy className="w-3 h-3" />
+                        Copy to Clipboard
+                      </div>
+                    </div>
+ 
+                    <Button 
+                      onClick={() => setShowReceiveModal(false)} 
+                      className="w-full py-4 rounded-3xl font-black uppercase tracking-widest text-xs" 
+                      style={{ background: `linear-gradient(to right, ${theme.primary}, ${theme.secondary})` }}
+                    >
+                      Done
+                    </Button>
+                  </div>
+               </motion.div>
+            </motion.div>
+          )}
+
+          {showSwap && activeWallet && (
+             <motion.div 
+               initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
+               className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-xl flex items-center justify-center p-6"
+             >
+               <motion.div className={`w-full max-w-md ${theme.id === 'glossy' ? 'glass-glossy' : 'bg-bolt-dark/95 border-white/10'} rounded-[40px] border p-8 flex flex-col gap-6 shadow-2xl relative`}>
+                  <button onClick={() => setShowSwap(false)} className="absolute top-6 right-6 p-2 rounded-full bg-white/5 hover:bg-white/10 transition-all">
+                    <X className="w-6 h-6 text-gray-500" />
+                  </button>
+
+                  <div className="text-center">
+                    <h3 className="text-2xl font-black text-white tracking-tight mb-1">Instant Swap</h3>
+                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">Cross-chain settlement engine</p>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="p-5 rounded-3xl bg-white/5 border border-white/5">
+                      <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-3">Pay</p>
+                      <div className="flex items-center justify-between">
+                        <select 
+                          value={swapFromAsset} 
+                          onChange={(e) => setSwapFromAsset(e.target.value)}
+                          className="bg-transparent text-xl font-black text-white outline-none"
+                        >
+                          <option value="MON">MON</option>
+                          <option value="ETH">ETH</option>
+                          <option value="USDC">USDC</option>
+                        </select>
+                        <input 
+                          type="number" 
+                          placeholder="0.00" 
+                          value={swapAmount} 
+                          onChange={(e) => { setSwapAmount(e.target.value); handleGetSwapQuote(); }}
+                          className="bg-transparent text-right text-2xl font-black text-white outline-none w-1/2"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-center -my-2 relative z-10">
+                      <div className="w-10 h-10 rounded-full bg-bolt-blue flex items-center justify-center border-4 border-bolt-dark shadow-xl">
+                        <ArrowDown className="w-5 h-5 text-black" />
+                      </div>
+                    </div>
+
+                    <div className="p-5 rounded-3xl bg-white/10 border border-white/10">
+                      <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-3">Receive</p>
+                      <div className="flex items-center justify-between">
+                        <select 
+                          value={swapToAsset} 
+                          onChange={(e) => setSwapToAsset(e.target.value)}
+                          className="bg-transparent text-xl font-black text-white outline-none"
+                        >
+                          <option value="USDC">USDC</option>
+                          <option value="MON">MON</option>
+                          <option value="ETH">ETH</option>
+                        </select>
+                        <div className="text-right">
+                          <p className="text-2xl font-black" style={{ color: theme.primary }}>{swapQuote ? swapQuote.toAmount : '0.00'}</p>
+                          <p className="text-[9px] font-bold text-gray-500 uppercase">Est. Output</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {swapQuote && (
+                    <div className="p-4 rounded-2xl bg-white/5 border border-white/5 space-y-2">
+                       <div className="flex justify-between text-[10px] font-bold">
+                          <span className="text-gray-500 uppercase">Rate</span>
+                          <span className="text-white">1 {swapFromAsset} ≈ {swapQuote.rate} {swapToAsset}</span>
+                       </div>
+                    </div>
+                  )}
+
+                  <Button 
+                    onClick={handleExecuteSwap} 
+                    disabled={isSwapping || !swapQuote} 
+                    className={`w-full py-5 rounded-[24px] font-black uppercase tracking-widest text-sm shadow-2xl ${theme.id === 'glossy' ? 'glossy-button' : ''}`}
+                    style={theme.id !== 'glossy' ? { background: `linear-gradient(to right, ${theme.primary}, ${theme.secondary})` } : {}}
+                  >
+                    {isSwapping ? 'Swapping...' : 'Execute Swap'}
+                  </Button>
+               </motion.div>
+             </motion.div>
+           )}
 
           {showImportContract && (
             <motion.div 
@@ -2010,9 +2262,25 @@ const App = () => {
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-x-3">
-                      <button className="px-4 py-2 rounded-xl border text-[10px] font-black hover:scale-105 active:scale-95 transition-all uppercase flex items-center gap-2 shadow-inner" style={{ backgroundColor: `${theme.primary}10`, borderColor: `${theme.primary}20`, color: theme.primary }}>
+                    <div className="flex items-center gap-x-2">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setActiveWallet(w); setShowSend(true); }}
+                        className="px-4 py-2 rounded-xl border text-[10px] font-black hover:scale-105 active:scale-95 transition-all uppercase flex items-center gap-2 shadow-inner" 
+                        style={{ backgroundColor: `${theme.primary}10`, borderColor: `${theme.primary}20`, color: theme.primary }}
+                      >
                         <Send className="w-3.5 h-3.5" />Send
+                      </button>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setActiveWallet(w); setShowReceiveModal(true); }}
+                        className="px-4 py-2 rounded-xl border text-[10px] font-black hover:scale-105 active:scale-95 transition-all uppercase flex items-center gap-2 shadow-inner bg-white/5 border-white/10 text-white"
+                      >
+                        <Download className="w-3.5 h-3.5" />Receive
+                      </button>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setActiveWallet(w); setShowSwap(true); }}
+                        className="px-4 py-2 rounded-xl border text-[10px] font-black hover:scale-105 active:scale-95 transition-all uppercase flex items-center gap-2 shadow-inner bg-white/5 border-white/10 text-white"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5 text-bolt-blue" />Swap
                       </button>
                     </div>
                   </motion.div>
@@ -2057,7 +2325,7 @@ const App = () => {
   }
 
   return (
-    <div style={themeStyles} className="min-h-screen text-white overflow-hidden relative font-sans flex flex-col items-center justify-center bg-bolt-dark">
+    <div style={themeStyles as any} className={`min-h-screen text-white overflow-hidden relative font-sans flex flex-col items-center justify-center ${theme.id === 'glossy' ? 'bg-[#07080A]' : 'bg-bolt-dark'}`}>
        {/* Security Overlay */}
        <AnimatePresence mode="wait">
          {isLocked && (

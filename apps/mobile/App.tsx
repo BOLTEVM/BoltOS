@@ -1,12 +1,68 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, View, Image, TouchableOpacity, SafeAreaView, StatusBar } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { 
+  StyleSheet, Text, View, Image, TouchableOpacity, 
+  SafeAreaView, StatusBar, TextInput, ScrollView,
+  Modal, ActivityIndicator, Clipboard
+} from 'react-native';
+import { BarCodeScanner } from 'expo-barcode-scanner';
+import QRCode from 'react-native-qrcode-svg';
 import { BoltwalletCore } from '@boltwallet/core';
+
+// Icons placeholder (Since we don't have a library yet, we'll use emojis or stylized View components)
+const FingerprintIcon = () => <View style={styles.iconCircle}><Text style={{ color: '#00d2ff', fontSize: 24 }}>⚡</Text></View>;
 
 const core = new BoltwalletCore();
 
 export default function App() {
   const [isCreating, setIsCreating] = useState(false);
   const [wallet, setWallet] = useState<any>(null);
+  
+  // Send state
+  const [showSend, setShowSend] = useState(false);
+  const [recipient, setRecipient] = useState('');
+  const [amount, setAmount] = useState('');
+  const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
+  const [isResolving, setIsResolving] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+
+  // QR state
+  const [showScanner, setShowScanner] = useState(false);
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [showReceive, setShowReceive] = useState(false);
+  const [showSwap, setShowSwap] = useState(false);
+  const [swapFromAsset, setSwapFromAsset] = useState('MON');
+  const [swapToAsset, setSwapToAsset] = useState('USDC');
+  const [swapAmount, setSwapAmount] = useState('');
+  const [swapQuote, setSwapQuote] = useState<any>(null);
+  const [isSwapping, setIsSwapping] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const { status } = await BarCodeScanner.requestPermissionsAsync();
+      setHasPermission(status === 'granted');
+    })();
+  }, []);
+
+  // ENS Resolution
+  useEffect(() => {
+    const resolve = async () => {
+      if (recipient.includes('.')) {
+        setIsResolving(true);
+        try {
+          const addr = await core.resolveName(recipient);
+          setResolvedAddress(addr);
+        } catch (err) {
+          setResolvedAddress(null);
+        } finally {
+          setIsResolving(false);
+        }
+      } else {
+        setResolvedAddress(null);
+      }
+    };
+    const timer = setTimeout(resolve, 500);
+    return () => clearTimeout(timer);
+  }, [recipient]);
 
   const handleCreate = async () => {
     setIsCreating(true);
@@ -20,99 +76,338 @@ export default function App() {
     }
   };
 
+  const handleSend = async () => {
+    if (!wallet) return;
+    setIsSending(true);
+    try {
+      const target = resolvedAddress || recipient;
+      await core.executeTransaction(wallet.id, {
+        to: target,
+        value: amount,
+        data: '0x'
+      });
+      alert('Transaction successful!');
+      setShowSend(false);
+      setRecipient('');
+      setAmount('');
+    } catch (err) {
+      alert('Transaction failed: ' + (err as Error).message);
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleExecuteSwap = async () => {
+    if (!wallet || !swapQuote) return;
+    setIsSwapping(true);
+    try {
+      const hash = await core.executeSwap(wallet.id, {
+        fromAsset: swapFromAsset,
+        toAsset: swapToAsset,
+        fromAmount: swapAmount,
+        ...swapQuote
+      });
+      alert('Swap Successful!\n' + hash);
+      setShowSwap(false);
+      setSwapQuote(null);
+      setSwapAmount('');
+    } catch (err) {
+      alert('Swap Failed: ' + (err as Error).message);
+    } finally {
+      setIsSwapping(false);
+    }
+  };
+
+  const handleGetQuote = async (val: string) => {
+    setSwapAmount(val);
+    if (!val || isNaN(parseFloat(val))) {
+      setSwapQuote(null);
+      return;
+    }
+    try {
+      const quote = await core.getSwapQuote(swapFromAsset, swapToAsset, val);
+      setSwapQuote(quote);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleBarCodeScanned = ({ data }: { data: string }) => {
+    setShowScanner(false);
+    setRecipient(data);
+  };
+
+  const copyToClipboard = () => {
+    if (wallet) {
+      Clipboard.setString(wallet.address);
+      alert('Address copied to clipboard!');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <View style={styles.content}>
-        <Image 
-          source={require('./assets/logo.png')} 
-          style={styles.logo} 
-        />
-        <Text style={styles.title}>BOLTWALLET</Text>
-        <Text style={styles.subtitle}>Secure Multi-Chain Custody</Text>
-
-        {!wallet ? (
+      
+      {!wallet ? (
+        <View style={styles.content}>
+          <Image source={require('./assets/logo.png')} style={styles.logo} />
+          <Text style={styles.title}>BOLTWALLET</Text>
+          <Text style={styles.subtitle}>Secure Multi-Chain Hub</Text>
           <TouchableOpacity 
             style={styles.button} 
             onPress={handleCreate}
             disabled={isCreating}
           >
             <Text style={styles.buttonText}>
-              {isCreating ? "INITIALIZING VAULT..." : "CREATE NEW WALLET"}
+              {isCreating ? "INITIALIZING..." : "GENERATE MASTER VAULT"}
             </Text>
           </TouchableOpacity>
-        ) : (
-          <View style={styles.walletCard}>
-            <Text style={styles.walletTitle}>Vault Active</Text>
-            <Text style={styles.walletId}>{wallet.name}</Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.dashboard}>
+          <View style={styles.header}>
+            <View>
+              <Text style={styles.greeting}>Vault Status: Active</Text>
+              <Text style={styles.walletName}>{wallet.name}</Text>
+            </View>
+            <FingerprintIcon />
           </View>
-        )}
-      </View>
+
+          <View style={styles.balanceCard}>
+            <Text style={styles.balanceLabel}>Total Liquidity</Text>
+            <Text style={styles.balanceValue}>$1,248.50</Text>
+            <View style={styles.actionRow}>
+              <TouchableOpacity onPress={() => setShowSend(true)} style={[styles.actionBtn, { backgroundColor: '#00d2ff' }]}>
+                <Text style={styles.actionBtnText}>SEND</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowReceive(true)} style={styles.actionBtn}>
+                <Text style={styles.actionBtnText}>RECEIVE</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowSwap(true)} style={[styles.actionBtn, { borderColor: '#00d2ff', borderWidth: 1 }]}>
+                <Text style={[styles.actionBtnText, { color: '#00d2ff' }]}>SWAP</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <Text style={styles.sectionTitle}>Recent Activity</Text>
+          {[1, 2].map((i) => (
+            <View key={i} style={styles.txRow}>
+              <View style={styles.txIcon}><Text style={{ color: '#fff' }}>⚡</Text></View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.txTitle}>Security Sync</Text>
+                <Text style={styles.txSub}>Complete · Ethereum</Text>
+              </View>
+              <Text style={styles.txValue}>+$0.00</Text>
+            </View>
+          ))}
+        </ScrollView>
+      )}
+
+      {/* Send Modal */}
+      <Modal visible={showSend} animationType="slide" transparent>
+        <View style={styles.modalBg}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Send Assets</Text>
+              <TouchableOpacity onPress={() => setShowSend(false)}><Text style={styles.closeBtn}>×</Text></TouchableOpacity>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Recipient Address or ENS</Text>
+              <View style={styles.recipientRow}>
+                <TextInput 
+                  style={styles.input} 
+                  value={recipient} 
+                  onChangeText={setRecipient}
+                  placeholder="0x... or name.eth"
+                  placeholderTextColor="#444"
+                />
+                <TouchableOpacity onPress={() => setShowScanner(true)} style={styles.scanBtn}>
+                  <Text style={{ fontSize: 20 }}>📸</Text>
+                </TouchableOpacity>
+              </View>
+              {isResolving && <Text style={styles.resolvingText}>Resolving Name...</Text>}
+              {resolvedAddress && <Text style={styles.resolvedText}>Resolved: {resolvedAddress.slice(0, 8)}...{resolvedAddress.slice(-6)}</Text>}
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Amount</Text>
+              <TextInput 
+                style={styles.input} 
+                value={amount} 
+                onChangeText={setAmount}
+                keyboardType="numeric"
+                placeholder="0.00"
+                placeholderTextColor="#444"
+              />
+            </View>
+
+            <TouchableOpacity 
+              style={[styles.button, { marginTop: 24, backgroundColor: isSending ? '#111' : '#00d2ff' }]} 
+              onPress={handleSend}
+              disabled={isSending || !recipient || !amount}
+            >
+              {isSending ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>SIGN & BROADCAST</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Swap Modal */}
+      <Modal visible={showSwap} animationType="slide" transparent>
+        <View style={styles.modalBg}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Swap Assets</Text>
+              <TouchableOpacity onPress={() => setShowSwap(false)}><Text style={styles.closeBtn}>×</Text></TouchableOpacity>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Pay with</Text>
+              <View style={styles.assetInput}>
+                <Text style={styles.assetName}>{swapFromAsset}</Text>
+                <TextInput 
+                  style={[styles.input, { textAlign: 'right' }]} 
+                  value={swapAmount} 
+                  onChangeText={handleGetQuote}
+                  keyboardType="numeric"
+                  placeholder="0.00"
+                  placeholderTextColor="#444"
+                />
+              </View>
+            </View>
+
+            <View style={{ alignItems: 'center', marginVertical: -10, zIndex: 10 }}>
+              <View style={styles.arrowCircle}>
+                <Text style={{ color: '#fff' }}>↓</Text>
+              </View>
+            </View>
+
+            <View style={[styles.inputGroup, { marginTop: 20 }]}>
+              <Text style={styles.label}>Receive</Text>
+              <View style={styles.assetInput}>
+                <Text style={styles.assetName}>{swapToAsset}</Text>
+                <View style={{ flex: 1, padding: 20, alignItems: 'flex-end' }}>
+                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: '900' }}>
+                    {swapQuote ? swapQuote.toAmount : '0.00'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {swapQuote && (
+              <View style={styles.quoteBox}>
+                <Text style={styles.quoteText}>1 {swapFromAsset} ≈ {swapQuote.rate} {swapToAsset}</Text>
+                <Text style={styles.quoteSub}>Fee: {swapQuote.fee} {swapFromAsset}</Text>
+              </View>
+            )}
+
+            <TouchableOpacity 
+              style={[styles.button, { marginTop: 24, backgroundColor: (isSwapping || !swapQuote) ? '#111' : '#00d2ff' }]} 
+              onPress={handleExecuteSwap}
+              disabled={isSwapping || !swapQuote}
+            >
+              {isSwapping ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>EXECUTE SWAP</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Scanner Modal */}
+      <Modal visible={showScanner} animationType="fade">
+        <View style={styles.fullBg}>
+          <BarCodeScanner
+            onBarCodeScanned={handleBarCodeScanned}
+            style={StyleSheet.absoluteFillObject}
+          />
+          <TouchableOpacity style={styles.scannerClose} onPress={() => setShowScanner(false)}>
+            <Text style={styles.buttonText}>CANCEL SCAN</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+      {/* Receive Modal */}
+      <Modal visible={showReceive} animationType="slide" transparent>
+        <View style={styles.modalBg}>
+          <View style={[styles.modalContent, { alignItems: 'center' }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Receive Funds</Text>
+              <TouchableOpacity onPress={() => setShowReceive(false)}><Text style={styles.closeBtn}>×</Text></TouchableOpacity>
+            </View>
+
+            <View style={styles.qrContainer}>
+              {wallet && (
+                <QRCode
+                  value={wallet.address}
+                  size={200}
+                  color="#000"
+                  backgroundColor="#fff"
+                />
+              )}
+            </View>
+
+            <TouchableOpacity style={styles.addressBox} onPress={copyToClipboard}>
+              <Text style={styles.addressText}>{wallet?.address}</Text>
+              <Text style={styles.copyNotice}>Tap to copy address</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.button} onPress={() => setShowReceive(false)}>
+              <Text style={styles.buttonText}>DONE</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0a0a0b',
-  },
-  content: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  logo: {
-    width: 120,
-    height: 120,
-    marginBottom: 24,
-  },
-  title: {
-    color: '#fff',
-    fontSize: 42,
-    fontWeight: '900',
-    letterSpacing: -1,
-  },
-  subtitle: {
-    color: '#00d2ff',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 48,
-    textTransform: 'uppercase',
-    letterSpacing: 2,
-  },
-  button: {
-    backgroundColor: '#00d2ff',
-    paddingVertical: 18,
-    paddingHorizontal: 32,
-    borderRadius: 12,
-    width: '100%',
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: '#000',
-    fontSize: 16,
-    fontWeight: 'bold',
-    letterSpacing: 1,
-  },
-  walletCard: {
-    backgroundColor: '#1a1a1c',
-    padding: 24,
-    borderRadius: 16,
-    width: '100%',
-    borderWidth: 1,
-    borderColor: '#333',
-  },
-  walletTitle: {
-    color: '#00d2ff',
-    fontSize: 14,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  walletId: {
-    color: '#fff',
-    fontSize: 18,
-    fontFamily: 'monospace',
-  }
+  container: { flex: 1, backgroundColor: '#07080A' },
+  content: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30 },
+  dashboard: { padding: 30 },
+  logo: { width: 100, height: 100, marginBottom: 20 },
+  title: { color: '#fff', fontSize: 36, fontWeight: '900', letterSpacing: -2 },
+  subtitle: { color: '#00d2ff', fontSize: 14, fontWeight: 'bold', marginBottom: 40, letterSpacing: 3 },
+  button: { backgroundColor: '#00d2ff', padding: 20, borderRadius: 20, width: '100%', alignItems: 'center', shadowColor: '#00d2ff', shadowOpacity: 0.3, shadowRadius: 10 },
+  buttonText: { color: '#000', fontSize: 16, fontWeight: '900', letterSpacing: 1 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 },
+  greeting: { color: '#444', fontSize: 12, fontWeight: 'bold', textTransform: 'uppercase' },
+  walletName: { color: '#fff', fontSize: 24, fontWeight: '900' },
+  iconCircle: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#222' },
+  balanceCard: { backgroundColor: '#111', padding: 30, borderRadius: 32, borderWidth: 1, borderColor: '#222', marginBottom: 30 },
+  balanceLabel: { color: '#444', fontSize: 12, fontWeight: 'bold', marginBottom: 10 },
+  balanceValue: { color: '#fff', fontSize: 42, fontWeight: '900' },
+  actionRow: { flexDirection: 'row', gap: 12, marginTop: 24 },
+  actionBtn: { flex: 1, backgroundColor: '#222', padding: 15, borderRadius: 16, alignItems: 'center' },
+  actionBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
+  sectionTitle: { color: '#fff', fontSize: 18, fontWeight: '900', marginBottom: 20 },
+  txRow: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 20, backgroundColor: '#111', padding: 16, borderRadius: 20, borderWidth: 1, borderColor: '#1a1a1c' },
+  txIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#222', alignItems: 'center', justifyContent: 'center' },
+  txTitle: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
+  txSub: { color: '#444', fontSize: 10 },
+  txValue: { color: '#fff', fontWeight: 'bold' },
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#0a0a0b', borderTopLeftRadius: 40, borderTopRightRadius: 40, padding: 30, paddingBottom: 50, borderTopWidth: 1, borderTopColor: '#222' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30, width: '100%' },
+  modalTitle: { color: '#fff', fontSize: 24, fontWeight: '900' },
+  closeBtn: { color: '#444', fontSize: 32, padding: 4 },
+  inputGroup: { marginBottom: 20 },
+  label: { color: '#444', fontSize: 12, fontWeight: 'bold', marginBottom: 8, textTransform: 'uppercase' },
+  recipientRow: { flexDirection: 'row', gap: 10 },
+  input: { flex: 1, backgroundColor: '#111', padding: 20, borderRadius: 20, color: '#fff', fontSize: 16, borderWidth: 1, borderColor: '#222' },
+  scanBtn: { backgroundColor: '#111', width: 64, height: 64, borderRadius: 20, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#222' },
+  resolvingText: { color: '#00d2ff', fontSize: 10, marginTop: 4, fontWeight: 'bold' },
+  resolvedText: { color: '#4cd964', fontSize: 10, marginTop: 4, fontWeight: 'bold' },
+  qrContainer: { padding: 20, backgroundColor: '#fff', borderRadius: 30, marginBottom: 30 },
+  addressBox: { backgroundColor: '#111', padding: 20, borderRadius: 20, width: '100%', marginBottom: 30, alignItems: 'center', borderWidth: 1, borderColor: '#222' },
+  addressText: { color: '#fff', fontSize: 12, fontFamily: 'monospace', textAlign: 'center' },
+  copyNotice: { color: '#00d2ff', fontSize: 10, fontWeight: 'bold', marginTop: 10, textTransform: 'uppercase' },
+  fullBg: { flex: 1, backgroundColor: '#000' },
+  scannerClose: { position: 'absolute', bottom: 50, alignSelf: 'center', backgroundColor: 'rgba(0,0,0,0.5)', padding: 20, borderRadius: 20 },
+  assetInput: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#111', borderRadius: 20, borderWidth: 1, borderColor: '#222' },
+  assetName: { color: '#fff', fontWeight: '900', paddingLeft: 20, fontSize: 16 },
+  arrowCircle: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#00d2ff', alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: '#07080A' },
+  quoteBox: { marginTop: 10, padding: 16, backgroundColor: '#111', borderRadius: 16, borderWidth: 1, borderColor: '#1a1a1c' },
+  quoteText: { color: '#fff', fontSize: 12, fontWeight: 'bold', textAlign: 'center' },
+  quoteSub: { color: '#444', fontSize: 10, textAlign: 'center', marginTop: 4 }
 });
