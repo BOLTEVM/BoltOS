@@ -82,7 +82,8 @@ const PRICE_FEED_IDS: Record<string, string> = {
   "polygon": "0xcc24d03da2d348003612f09d3c5f5905d49ac539fe38466e3ef6022e0325493b",
   "pulsechain": "0xecf55730022301c80fbbcc2c7199990e1f75323ddf069f21f64f77c8e96bf655",
   "monad": "0x",
-  "sui": "0x50c18d9ef61730bb53c448eb3b054817a2e0a010899def360e4282367f08365a"
+  "sui": "0x50c18d9ef61730bb53c448eb3b054817a2e0a010899def360e4282367f08365a",
+  "coredao": "0x1bf60fe662ecab2f06997df00c61f86778eaa158850043ae999971477f4a0f97"
 };
 
 const DERIVATION_PATHS: Record<string, string> = {
@@ -95,7 +96,8 @@ const DERIVATION_PATHS: Record<string, string> = {
   "bitcoin": "m/84'/0'/0'/0/",
   "sui": "m/44'/784'/0'/0'/",
   "xrpl_evm": "m/44'/60'/0'/0/",
-  "tron_evm": "m/44'/60'/0'/0/"
+  "tron_evm": "m/44'/60'/0'/0/",
+  "coredao": "m/44'/60'/0'/0/"
 };
 
 export const CHAINS = CORE_CHAINS;

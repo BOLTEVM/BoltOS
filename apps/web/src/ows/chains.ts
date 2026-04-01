@@ -91,5 +91,13 @@ export const CHAINS: Record<string, ChainConfig> = {
     explorer: "https://bttcscan.com",
     nativeCurrency: { name: "BTT", symbol: "BTT", decimals: 18 },
     derivationPath: "m/44'/60'/0'/0/0"
+  },
+  coredao: {
+    name: "CORE",
+    id: "1116",
+    rpc: "https://rpc.coredao.org",
+    explorer: "https://scan.coredao.org",
+    nativeCurrency: { name: "CORE", symbol: "CORE", decimals: 18 },
+    derivationPath: "m/44'/60'/0'/0/0"
   }
 };

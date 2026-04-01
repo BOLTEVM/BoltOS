@@ -212,6 +212,7 @@ const App = () => {
     { id: 'sui', name: 'Sui', icon: <NetworkIcon chainId="sui" className="w-4 h-4" /> },
     { id: 'xrpl_evm', name: 'XRPL EVM', icon: <NetworkIcon chainId="xrpl" className="w-4 h-4" /> },
     { id: 'tron_evm', name: 'TRON EVM', icon: <NetworkIcon chainId="tron" className="w-4 h-4" /> },
+    { id: 'coredao', name: 'CORE', icon: <NetworkIcon chainId="coredao" className="w-4 h-4" /> },
   ];
 
   useEffect(() => {

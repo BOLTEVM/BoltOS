@@ -56,6 +56,14 @@ export const XRPIcon = ({ className = 'w-5 h-5' }) => (
   </svg>
 );
 
+export const CoreIcon = ({ className = 'w-5 h-5' }) => (
+  <svg viewBox="0 0 32 32" className={className} fill="none">
+    <circle cx="16" cy="16" r="16" fill="#FFBD1A"/>
+    <path d="M22 16C22 19.3137 19.3137 22 16 22C12.6863 22 10 19.3137 10 16C10 12.6863 12.6863 10 16 10" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
+    <path d="M16 16L20 16" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
+  </svg>
+);
+
 export const NetworkIcon = ({ chainId, className = 'w-5 h-5' }: { chainId: string, className?: string }) => {
   switch (chainId) {
     case 'ethereum': return <EthereumIcon className={className} />;
@@ -70,6 +78,7 @@ export const NetworkIcon = ({ chainId, className = 'w-5 h-5' }: { chainId: strin
     case 'xrpl': return <XRPIcon className={className} />;
     case 'xrpl_evm': return <XRPIcon className={className} />;
     case 'tron_evm': return <TronIcon className={className} />;
+    case 'coredao': return <CoreIcon className={className} />;
     default: return null;
   }
 };
