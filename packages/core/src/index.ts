@@ -52,9 +52,19 @@ import {
   LogEvent
 } from "@open-wallet-standard/core";
 import { CHAINS, ChainConfig } from "./chains";
+import { SwapProvider, SwapQuote, SwapQuoteParams, BridgeQuoteParams, SwapError } from "./swap";
 import { ethers } from "ethers";
 export { CHAINS };
 export type { ChainConfig };
+export { SwapProvider, SwapError };
+export type { SwapQuote, SwapQuoteParams, BridgeQuoteParams };
+export type {
+  TokenInfo,
+  FeeCost,
+  GasCost,
+  TransactionRequest,
+  RouteStep,
+} from "./swap";
 
 export interface WalletData {
   id: string;
@@ -96,9 +106,11 @@ export interface HistoryData {
 
 export class BoltwalletCore {
   private currentChain: ChainConfig;
+  private swapProvider: SwapProvider;
 
   constructor(chainKey: keyof typeof CHAINS = "ethereum") {
     this.currentChain = CHAINS[chainKey];
+    this.swapProvider = new SwapProvider();
   }
 
   async checkVault() {
@@ -162,6 +174,10 @@ export class BoltwalletCore {
 
   getSupportedChains() {
     return Object.keys(CHAINS);
+  }
+
+  addCustomChain(key: string, config: ChainConfig) {
+    CHAINS[key] = config;
   }
 
   async importContract(name: string, address: string, abi: string, decimals: number): Promise<ContractData> {
@@ -259,58 +275,95 @@ export class BoltwalletCore {
     if (!name.includes('.')) return null;
     try {
       const provider = new ethers.JsonRpcProvider(CHAINS.ethereum.rpc);
-      return await provider.resolveName(name);
+      const resolved = await provider.resolveName(name);
+      // Validate that the resolved result is a valid EVM address
+      if (resolved && !ethers.isAddress(resolved)) {
+        console.warn("ENS resolved to invalid address:", resolved);
+        return null;
+      }
+      return resolved;
     } catch (err) {
       console.warn("ENS Resolution failed:", err);
       return null;
     }
   }
 
+  /**
+   * Execute a signed transaction and broadcast it to the network.
+   * CRITICAL: Errors are propagated — no fake hash generation.
+   */
   async executeTransaction(walletName: string, txData: any): Promise<string> {
     const signature = await this.signTransaction(walletName, txData);
     const provider = new ethers.JsonRpcProvider(this.currentChain.rpc);
-    
-    // In a real scenario, we might need the full signed serialized transaction.
-    // For this OWS integration, we'll assume signTransaction returns a format broadcastable via the generic provider
-    // or simulate the broadcast for demonstration.
-    try {
-      const response = await provider.broadcastTransaction(signature);
-      return response.hash;
-    } catch (err) {
-      console.error("Broadcast failed, simulating for demo:", signature);
-      // Fallback for demo environments where signature might not be a full raw tx
-      return "0x" + Math.random().toString(16).slice(2, 42); 
+    const response = await provider.broadcastTransaction(signature);
+    return response.hash;
+  }
+
+  /**
+   * Get a real-time swap quote from aggregated DEXs via LI.FI.
+   * Replaces the former mock implementation with live market data.
+   */
+  async getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
+    return this.swapProvider.getQuote(params);
+  }
+
+  /**
+   * Execute a swap using the validated quote's transaction calldata.
+   * The transaction is sent to the actual router contract specified in the quote.
+   * No hardcoded addresses — all routing data comes from the live quote.
+   */
+  async executeSwap(walletName: string, quote: SwapQuote): Promise<string> {
+    if (!quote.transactionRequest?.to || !quote.transactionRequest?.data) {
+      throw new SwapError(
+        'Invalid swap quote: missing transaction request data.',
+        'INVALID_QUOTE'
+      );
     }
-  }
 
-  async getSwapQuote(fromAsset: string, toAsset: string, amount: string): Promise<any> {
-    // Mocking a swap quote logic
-    const mockRate = fromAsset === 'MON' ? 0.024 : 41.66;
-    const fromAmount = parseFloat(amount) || 0;
-    const toAmount = fromAmount * mockRate;
-    const fee = 0.001;
-
-    return {
-      fromAsset,
-      toAsset,
-      fromAmount,
-      toAmount: toAmount.toFixed(4),
-      rate: mockRate,
-      fee,
-      estimatedGas: "0.0001"
-    };
-  }
-
-  async executeSwap(walletName: string, swapData: any): Promise<string> {
-    // Construct a swap transaction
-    // In reality, this would call a router contract (e.g., Uniswap/Kyber)
-    const tx = {
-      to: "0x1111111254fb6c44bac0bed2854e76f90643097d", // Mock Router
-      value: swapData.fromAsset === 'native' ? swapData.fromAmount : "0",
-      data: "0x12345678" // Mock data
+    const txData = {
+      to: quote.transactionRequest.to,
+      value: quote.transactionRequest.value || '0',
+      data: quote.transactionRequest.data,
+      gasLimit: quote.transactionRequest.gasLimit,
+      chainId: quote.transactionRequest.chainId,
     };
 
-    return this.executeTransaction(walletName, tx);
+    return this.executeTransaction(walletName, txData);
+  }
+
+  /**
+   * Get a bridge quote for cross-chain transfers via LI.FI.
+   */
+  async getBridgeQuote(params: BridgeQuoteParams): Promise<SwapQuote> {
+    return this.swapProvider.getBridgeQuote(params);
+  }
+
+  /**
+   * Execute a cross-chain bridge using the validated quote.
+   */
+  async executeBridge(walletName: string, quote: SwapQuote): Promise<string> {
+    return this.executeSwap(walletName, quote);
+  }
+
+  /**
+   * Check if an ERC20 approval is needed before executing a swap/bridge.
+   */
+  async checkSwapApproval(
+    tokenAddress: string,
+    ownerAddress: string,
+    spenderAddress: string,
+    amount: string
+  ) {
+    const chainKey = Object.keys(CHAINS).find(k => CHAINS[k].chainId === this.currentChain.chainId) || 'ethereum';
+    return this.swapProvider.checkApproval(tokenAddress, ownerAddress, spenderAddress, amount, chainKey);
+  }
+
+  /**
+   * Fetch tokens available for swap on the current chain.
+   */
+  async getSwapTokens(): Promise<any[]> {
+    const chainKey = Object.keys(CHAINS).find(k => CHAINS[k].chainId === this.currentChain.chainId) || 'ethereum';
+    return this.swapProvider.getSupportedTokens(chainKey);
   }
 }
 

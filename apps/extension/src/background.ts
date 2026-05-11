@@ -2,7 +2,7 @@
 import { DEFAULT_API_KEY } from './secrets.js';
 // Manages vault session state, context menus, and recovery flows.
 // @ts-ignore
-const chrome = (globalThis as any).chrome;
+const _chrome = (globalThis as any).chrome;
 
 let sessionVault: any = null;
 let lastActive = Date.now();
@@ -11,7 +11,7 @@ let logVerbosity = 'compact';
 
 // Load initial settings from storage
 // @ts-ignore
-chrome.storage.local.get(['bolt_session_timeout', 'bolt_log_verbosity'], (res) => {
+_chrome.storage.local.get(['bolt_session_timeout', 'bolt_log_verbosity'], (res) => {
   if (res.bolt_session_timeout) sessionTimeoutLimit = parseInt(res.bolt_session_timeout) * 60 * 1000;
   if (res.bolt_log_verbosity) logVerbosity = res.bolt_log_verbosity;
 });
@@ -28,7 +28,7 @@ const logBackgroundEvent = (event: any) => {
   if (backgroundLogs.length > 100) backgroundLogs.shift();
   // Notify any open popups
   // @ts-ignore
-  chrome.runtime.sendMessage({ type: 'BOLT_LOG_EVENT', log }).catch(() => {});
+  _chrome.runtime.sendMessage({ type: 'BOLT_LOG_EVENT', log }).catch(() => {});
 };
 
 const CHAINS_RPC: Record<string, string> = {
@@ -45,10 +45,10 @@ const CHAINS_RPC: Record<string, string> = {
 };
 
 // @ts-ignore
-chrome.runtime.onMessage.addListener((message: any, sender: any, sendResponse: any) => {
+_chrome.runtime.onMessage.addListener((message: any, sender: any, sendResponse: any) => {
   // BOLT-SECURITY: Strict Origin & Identity Validation
-  const isExtensionContext = sender.id === chrome.runtime.id;
-  const isInternalOrigin = sender.url?.startsWith(chrome.runtime.getURL(''));
+  const isExtensionContext = sender.id === _chrome.runtime.id;
+  const isInternalOrigin = sender.url?.startsWith(_chrome.runtime.getURL(''));
   
   if (!isExtensionContext && !isInternalOrigin) {
     logBackgroundEvent({
@@ -157,7 +157,7 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, sendResponse: a
       executeRequest(message.rpcUrl);
     } else {
       // @ts-ignore
-      chrome.storage.local.get(['selectedChain'], (result: any) => {
+      _chrome.storage.local.get(['selectedChain'], (result: any) => {
         const chain = result.selectedChain || 'ethereum';
         const rpcUrl = CHAINS_RPC[chain] || CHAINS_RPC.ethereum;
         executeRequest(rpcUrl);
@@ -172,9 +172,9 @@ chrome.runtime.onMessage.addListener((message: any, sender: any, sendResponse: a
 
 // Alarm for session timeout cleanup
 // @ts-ignore
-chrome.alarms.create('checkSession', { periodInMinutes: 1 });
+_chrome.alarms.create('checkSession', { periodInMinutes: 1 });
 // @ts-ignore
-chrome.alarms.onAlarm.addListener((alarm: any) => {
+_chrome.alarms.onAlarm.addListener((alarm: any) => {
   if (alarm.name === 'checkSession') {
     if (Date.now() - lastActive > sessionTimeoutLimit) {
       sessionVault = null;
@@ -183,9 +183,9 @@ chrome.alarms.onAlarm.addListener((alarm: any) => {
 });
 
 // @ts-ignore
-chrome.runtime.onInstalled.addListener(() => {
+_chrome.runtime.onInstalled.addListener(() => {
   // @ts-ignore
-  chrome.contextMenus.create({
+  _chrome.contextMenus.create({
     id: "recovery",
     title: "Forgot Password? Use Recovery Phrase",
     contexts: ["action"]
@@ -193,10 +193,10 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 // @ts-ignore
-chrome.contextMenus.onClicked.addListener((info: any, tab: any) => {
+_chrome.contextMenus.onClicked.addListener((info: any, tab: any) => {
   if (info.menuItemId === "recovery") {
     // Open recovery in a separate tab if the popup is too small or inaccessible
     // @ts-ignore
-    chrome.tabs.create({ url: 'index.html#recovery' });
+    _chrome.tabs.create({ url: 'index.html#recovery' });
   }
 });

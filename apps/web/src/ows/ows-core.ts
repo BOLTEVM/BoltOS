@@ -112,11 +112,101 @@ export interface WalletData {
 
 let sessionMnemonic: string | null = null;
 
+// ── LI.FI API Integration ──────────────────────────────────────
+const LIFI_API_BASE = "https://li.quest/v1";
+const NATIVE_TOKEN_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+
+export interface SwapQuoteParams {
+  fromChainKey: string;
+  toChainKey: string;
+  fromToken: string;
+  toToken: string;
+  fromAmount: string;
+  fromAddress: string;
+  slippage: number;
+}
+
+export interface SwapQuote {
+  id: string;
+  fromToken: any;
+  toToken: any;
+  fromAmount: string;
+  toAmount: string;
+  toAmountMin: string;
+  rate: string;
+  estimatedGasUSD: string;
+  feeCosts: any[];
+  gasCosts: any[];
+  transactionRequest: { to: string; data: string; value: string; gasLimit: string; chainId: number };
+  tool: string;
+  approvalRequired: boolean;
+  approvalAddress?: string;
+  executionDurationSeconds: number;
+}
+
+const resolveChainId = (chainKey: string): number => {
+  const chain = CHAINS[chainKey as keyof typeof CHAINS];
+  if (!chain) throw new Error(`Unknown chain: ${chainKey}`);
+  if (chain.chainId === 0) throw new Error(`Chain ${chain.name} is not supported for swaps/bridges (non-EVM).`);
+  return chain.chainId;
+};
+
+const resolveTokenAddress = (token: string, chainKey: string): string => {
+  if (token === 'native' || token === '' || token === '0x0') return NATIVE_TOKEN_ADDRESS;
+  const chain = CHAINS[chainKey as keyof typeof CHAINS];
+  if (chain && token.toUpperCase() === chain.nativeCurrency.symbol.toUpperCase()) return NATIVE_TOKEN_ADDRESS;
+  if (token.startsWith('0x') && token.length === 42) return token;
+  return token;
+};
+
+const mapLifiQuoteResponse = (data: any): SwapQuote => {
+  const action = data.action || {};
+  const estimate = data.estimate || {};
+  const txReq = data.transactionRequest || {};
+
+  const fromAmount = estimate.fromAmount || action.fromAmount || '0';
+  const toAmount = estimate.toAmount || '0';
+  const toAmountMin = estimate.toAmountMin || toAmount;
+
+  const fromDecimals = action.fromToken?.decimals || 18;
+  const toDecimals = action.toToken?.decimals || 18;
+  const fromNum = parseFloat(fromAmount) / Math.pow(10, fromDecimals);
+  const toNum = parseFloat(toAmount) / Math.pow(10, toDecimals);
+  const rate = fromNum > 0 ? (toNum / fromNum).toFixed(6) : '0';
+
+  const gasCosts = (estimate.gasCosts || []);
+  const estimatedGasUSD = gasCosts.reduce((sum: number, g: any) => sum + parseFloat(g.amountUSD || '0'), 0).toFixed(2);
+
+  return {
+    id: data.id || `quote-${Date.now()}`,
+    fromToken: action.fromToken || {},
+    toToken: action.toToken || {},
+    fromAmount,
+    toAmount,
+    toAmountMin,
+    rate,
+    estimatedGasUSD,
+    feeCosts: estimate.feeCosts || [],
+    gasCosts,
+    transactionRequest: {
+      to: txReq.to || '',
+      data: txReq.data || '',
+      value: txReq.value || '0',
+      gasLimit: txReq.gasLimit || txReq.gas || '300000',
+      chainId: txReq.chainId || 0,
+    },
+    tool: data.tool || 'unknown',
+    approvalRequired: !!(estimate.approvalAddress) && (action.fromToken?.address !== NATIVE_TOKEN_ADDRESS),
+    approvalAddress: estimate.approvalAddress,
+    executionDurationSeconds: estimate.executionDuration || 0,
+  };
+};
+
 export class BoltwalletCore {
   private chainId: string = 'ethereum';
   
   async getWallets() { return listWallets(); }
-  async listWallets() { return listWallets(); } // Consistency for multi-UI support
+  async listWallets() { return listWallets(); }
   async createNewWallet(name: string) { return createWallet(name); }
   async isVaultLocked() { return isVaultLocked(); }
   async unlockVault(password: string) { return unlockVault(password); }
@@ -158,9 +248,118 @@ export class BoltwalletCore {
     this.chainId = chainId; 
     setActiveChain(chainId);
   }
+
+  addCustomChain(key: string, config: any) {
+    (CHAINS as any)[key] = config;
+  }
+
+  async setSession(mnemonic: string | null) {
+    setSessionMnemonic(mnemonic);
+  }
+
+  /**
+   * Resolve an ENS name to an address with checksum validation.
+   */
+  async resolveName(name: string): Promise<string | null> {
+    if (!name.includes('.')) return null;
+    try {
+      const provider = new ethers.JsonRpcProvider(CHAINS.ethereum.rpc);
+      const resolved = await provider.resolveName(name);
+      if (resolved && !ethers.isAddress(resolved)) {
+        console.warn("ENS resolved to invalid address:", resolved);
+        return null;
+      }
+      return resolved;
+    } catch (err) {
+      console.warn("ENS Resolution failed:", err);
+      return null;
+    }
+  }
   
   onLogs(cb: any) { return onLogs(cb); }
   getLogs() { return getLogs(); }
+
+  /**
+   * Execute a transaction and broadcast. CRITICAL: errors propagate, no fake hashes.
+   */
+  async executeTransaction(walletId: string, txData: any): Promise<string> {
+    const result = await this.signTransaction(walletId, txData);
+    const rpc = CHAINS[this.chainId as keyof typeof CHAINS]?.rpc || '';
+    const provider = new ethers.JsonRpcProvider(rpc);
+    const response = await provider.broadcastTransaction(result.signature);
+    return response.hash;
+  }
+
+  /**
+   * Get a real-time swap quote from LI.FI aggregator.
+   * All bridge/DEX providers are unrestricted.
+   */
+  async getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
+    const fromChainId = resolveChainId(params.fromChainKey);
+    const toChainId = resolveChainId(params.toChainKey);
+    const fromToken = resolveTokenAddress(params.fromToken, params.fromChainKey);
+    const toToken = resolveTokenAddress(params.toToken, params.toChainKey);
+
+    const queryParams = new URLSearchParams({
+      fromChain: fromChainId.toString(),
+      toChain: toChainId.toString(),
+      fromToken,
+      toToken,
+      fromAmount: params.fromAmount,
+      fromAddress: params.fromAddress,
+      slippage: params.slippage.toString(),
+      integrator: 'boltwallet',
+    });
+
+    const url = `${LIFI_API_BASE}/quote?${queryParams.toString()}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(`Swap quote failed (${response.status}): ${errorBody}`);
+    }
+
+    const data = await response.json();
+    return mapLifiQuoteResponse(data);
+  }
+
+  /**
+   * Execute a swap using validated quote calldata. No hardcoded router addresses.
+   */
+  async executeSwap(walletId: string, quote: SwapQuote): Promise<string> {
+    if (!quote.transactionRequest?.to || !quote.transactionRequest?.data) {
+      throw new Error('Invalid swap quote: missing transaction request data.');
+    }
+    const txData = {
+      to: quote.transactionRequest.to,
+      value: quote.transactionRequest.value || '0',
+      data: quote.transactionRequest.data,
+      gasLimit: quote.transactionRequest.gasLimit,
+    };
+    return this.executeTransaction(walletId, txData);
+  }
+
+  /**
+   * Get a bridge quote (cross-chain) from LI.FI.
+   */
+  async getBridgeQuote(params: SwapQuoteParams): Promise<SwapQuote> {
+    const fromChainId = resolveChainId(params.fromChainKey);
+    const toChainId = resolveChainId(params.toChainKey);
+    if (fromChainId === toChainId) {
+      throw new Error('Bridge requires different source and destination chains.');
+    }
+    return this.getSwapQuote(params);
+  }
+
+  /**
+   * Execute a cross-chain bridge using validated quote.
+   */
+  async executeBridge(walletId: string, quote: SwapQuote): Promise<string> {
+    return this.executeSwap(walletId, quote);
+  }
 }
 
 // Crypto Helpers

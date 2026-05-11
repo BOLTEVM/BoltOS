@@ -9,7 +9,6 @@ import {
   Zap, 
   Copy, 
   Trash2, 
-  Fingerprint, 
   ChevronRight, 
   Lock,
   History,
@@ -36,11 +35,12 @@ import {
   Terminal,
   Download,
   Activity,
-  ArrowDown
+  ArrowDown,
+  ArrowLeftRight
 } from 'lucide-react';
 import { Button } from '@boltwallet/ui';
 import { NetworkIcon } from './components/NetworkIcons';
-import { WalletData, ContractData, NFTData, CHAINS, HistoryData, LogEvent, BoltwalletCore } from './ows/ows-core';
+import { WalletData, ContractData, NFTData, CHAINS, HistoryData, LogEvent, BoltwalletCore, SwapQuote, SwapQuoteParams } from './ows/ows-core';
 import { ethers } from 'ethers';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { QRCodeSVG } from 'qrcode.react';
@@ -158,6 +158,7 @@ const App = () => {
   const [newNFTTokenId, setNewNFTTokenId] = useState('');
   const [newNFTAbi, setNewNFTAbi] = useState('');
   const [sendTab, setSendTab] = useState<'token' | 'nft'>('token');
+  const [sendAsset, setSendAsset] = useState<string>('native');
   const [showConfirmSend, setShowConfirmSend] = useState(false);
   const [estimatedFee, setEstimatedFee] = useState('<$0.01');
   const [simulationStatus, setSimulationStatus] = useState<'success' | 'warning' | 'error'>('success');
@@ -193,15 +194,26 @@ const App = () => {
   const [showQRScanner, setShowQRScanner] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [showSwap, setShowSwap] = useState(false);
+  const [showBridge, setShowBridge] = useState(false);
+  const [bridgeFromChain, setBridgeFromChain] = useState('ethereum');
+  const [bridgeToChain, setBridgeToChain] = useState('monad');
+  const [bridgeAmount, setBridgeAmount] = useState('');
+  const [isBridging, setIsBridging] = useState(false);
+  const [bridgeQuote, setBridgeQuote] = useState<SwapQuote | null>(null);
   const [swapFromAsset, setSwapFromAsset] = useState('MON');
   const [swapToAsset, setSwapToAsset] = useState('USDC');
   const [swapAmount, setSwapAmount] = useState('');
-  const [swapQuote, setSwapQuote] = useState<any>(null);
+  const [swapQuote, setSwapQuote] = useState<SwapQuote | null>(null);
   const [isSwapping, setIsSwapping] = useState(false);
+  const [swapSlippage, setSwapSlippage] = useState(0.005); // 0.5% default
+  const [swapError, setSwapError] = useState('');
+  const [showAddNetwork, setShowAddNetwork] = useState(false);
+  const [customNetworks, setCustomNetworks] = useState<any[]>([]);
+  const [newNetwork, setNewNetwork] = useState({ name: '', id: '', rpc: '', explorer: '', currencySymbol: '', currencyName: '', decimals: 18 });
 
   const theme = THEMES[currentThemeIdx];
 
-  const chains = [
+  const baseChains = [
     { id: 'ethereum', name: 'Ethereum', icon: <NetworkIcon chainId="ethereum" className="w-4 h-4" /> },
     { id: 'bitcoin', name: 'Bitcoin', icon: <NetworkIcon chainId="bitcoin" className="w-4 h-4" /> },
     { id: 'bsc', name: 'BNB Chain', icon: <NetworkIcon chainId="bsc" className="w-4 h-4" /> },
@@ -213,6 +225,11 @@ const App = () => {
     { id: 'xrpl_evm', name: 'XRPL EVM', icon: <NetworkIcon chainId="xrpl" className="w-4 h-4" /> },
     { id: 'tron_evm', name: 'TRON EVM', icon: <NetworkIcon chainId="tron" className="w-4 h-4" /> },
     { id: 'coredao', name: 'CORE', icon: <NetworkIcon chainId="coredao" className="w-4 h-4" /> },
+  ];
+
+  const chains = [
+    ...baseChains,
+    ...customNetworks.map(cn => ({ id: cn.id, name: cn.name, icon: <Globe className="w-4 h-4" /> }))
   ];
 
   useEffect(() => {
@@ -246,6 +263,24 @@ const App = () => {
       if (savedTheme) {
         const idx = THEMES.findIndex(t => t.id === savedTheme);
         if (idx !== -1) setCurrentThemeIdx(idx);
+      }
+      
+      const savedNetworksStr = await boltStorage.getItem('bolt_custom_networks');
+      if (savedNetworksStr) {
+        try {
+          const networks = JSON.parse(savedNetworksStr);
+          setCustomNetworks(networks);
+          networks.forEach((n: any) => {
+            core.addCustomChain(n.id, {
+              name: n.name,
+              id: n.id,
+              rpc: n.rpc,
+              explorer: n.explorer,
+              nativeCurrency: { name: n.currencyName, symbol: n.currencySymbol, decimals: n.decimals },
+              derivationPath: "m/44'/60'/0'/0/0"
+            });
+          });
+        } catch (e) { console.error('Failed to parse custom networks'); }
       }
     };
 
@@ -445,6 +480,28 @@ const App = () => {
     return () => clearTimeout(timer);
   }, [recipient]);
 
+  const handleAddCustomNetwork = async () => {
+    if (!newNetwork.name || !newNetwork.id || !newNetwork.rpc || !newNetwork.currencySymbol) return;
+    const network = {
+      ...newNetwork,
+      decimals: parseInt(newNetwork.decimals as any) || 18,
+      currencyName: newNetwork.currencyName || newNetwork.currencySymbol
+    };
+    const updatedNetworks = [...customNetworks, network];
+    setCustomNetworks(updatedNetworks);
+    core.addCustomChain(network.id, {
+      name: network.name,
+      id: network.id,
+      rpc: network.rpc,
+      explorer: network.explorer,
+      nativeCurrency: { name: network.currencyName, symbol: network.currencySymbol, decimals: network.decimals },
+      derivationPath: "m/44'/60'/0'/0/0"
+    });
+    await boltStorage.setItem('bolt_custom_networks', JSON.stringify(updatedNetworks));
+    setNewNetwork({ name: '', id: '', rpc: '', explorer: '', currencySymbol: '', currencyName: '', decimals: 18 });
+    setShowAddNetwork(false);
+  };
+
   const handleChainChange = (chainId: string) => {
     setSelectedChain(chainId);
     core.setChain(chainId);
@@ -552,10 +609,33 @@ const App = () => {
         speed: 'average'
       });
       
+      let txTo = finalRecipient;
+      let txValue = amount;
+      let txData: string | undefined = undefined;
+
+      if (sendTab === 'token' && sendAsset !== 'native') {
+        const tokenContract = contracts.find(c => c.address === sendAsset);
+        if (tokenContract) {
+          try {
+             txTo = sendAsset;
+             txValue = "0";
+             const iface = new ethers.Interface(ERC20_ABI);
+             const parsedAmount = ethers.parseUnits(amount, tokenContract.decimals);
+             txData = iface.encodeFunctionData("transfer", [finalRecipient, parsedAmount]);
+          } catch (e) {
+             console.error("Failed to encode token transfer", e);
+             alert("Error encoding custom token transfer. Please check decimals and amount.");
+             setIsSending(false);
+             return;
+          }
+        }
+      }
+
       setProposedTx({
-        to: finalRecipient,
-        value: amount,
+        to: txTo,
+        value: txValue,
         from: activeWallet.address,
+        data: txData,
         maxFeePerGas: ethers.parseUnits(estimates.average.maxFee, 'gwei').toString(),
         maxPriorityFeePerGas: ethers.parseUnits(estimates.average.priorityFee, 'gwei').toString(),
         gasLimit: '21000',
@@ -571,9 +651,7 @@ const App = () => {
       }
     } catch (err) {
       console.error("Gas fetch failed", err);
-      // Fallback
-      setProposedTx({ to: recipient, value: amount, from: activeWallet.address });
-      setShowConfirmSend(true);
+      alert("Failed to estimate gas. Please check your network connection and try again.");
     } finally {
       setIsSending(false);
     }
@@ -612,33 +690,67 @@ const App = () => {
   };
 
   const handleGetSwapQuote = async () => {
-    if (!swapAmount || isNaN(parseFloat(swapAmount))) return;
+    if (!swapAmount || isNaN(parseFloat(swapAmount)) || !activeWallet) return;
+    setSwapError('');
+    setSwapQuote(null);
     try {
-      const quote = await core.getSwapQuote(swapFromAsset, swapToAsset, swapAmount);
+      const nativeCurrency = chains.find(c => c.id === selectedChain)?.name || 'ETH';
+      const fromAmountWei = ethers.parseUnits(swapAmount, 18).toString();
+      const quote = await core.getSwapQuote({
+        fromChainKey: selectedChain,
+        toChainKey: selectedChain,
+        fromToken: swapFromAsset,
+        toToken: swapToAsset,
+        fromAmount: fromAmountWei,
+        fromAddress: activeWallet.address,
+        slippage: swapSlippage,
+      });
       setSwapQuote(quote);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Quote Error:", err);
+      setSwapError(err.message || 'Failed to fetch quote');
     }
   };
 
   const handleExecuteSwap = async () => {
     if (!activeWallet || !swapQuote) return;
     setIsSwapping(true);
+    setSwapError('');
     try {
-      const hash = await core.executeSwap(activeWallet.id, {
-        fromAsset: swapFromAsset,
-        toAsset: swapToAsset,
-        fromAmount: swapAmount,
-        ...swapQuote
-      });
+      const hash = await core.executeSwap(activeWallet.id, swapQuote);
       alert(`Swap Successful! Hash: ${hash}`);
       setShowSwap(false);
       setSwapQuote(null);
       setSwapAmount('');
-    } catch (err) {
-      alert(`Swap Failed: ${err}`);
+    } catch (err: any) {
+      setSwapError(err.message || 'Swap execution failed');
     } finally {
       setIsSwapping(false);
+    }
+  };
+
+  const handleExecuteBridge = async () => {
+    if (!activeWallet || !bridgeAmount) return;
+    setIsBridging(true);
+    try {
+      const fromAmountWei = ethers.parseUnits(bridgeAmount, 18).toString();
+      const quote = await core.getBridgeQuote({
+        fromChainKey: bridgeFromChain,
+        toChainKey: bridgeToChain,
+        fromToken: 'native',
+        toToken: 'native',
+        fromAmount: fromAmountWei,
+        fromAddress: activeWallet.address,
+        slippage: swapSlippage,
+      });
+      const hash = await core.executeBridge(activeWallet.id, quote);
+      alert(`Bridge Successful! Hash: ${hash}`);
+      setShowBridge(false);
+      setBridgeAmount('');
+    } catch (err: any) {
+      alert(`Bridge Failed: ${err.message || err}`);
+    } finally {
+      setIsBridging(false);
     }
   };
 
@@ -678,7 +790,6 @@ const App = () => {
   const executeSend = async () => {
     if (!proposedTx || !activeWallet) return;
     setIsSending(true);
-    setTxStatus('transferring');
     setTxStatus('transferring');
     try {
       const result = await core.signTransaction(activeWallet.id, proposedTx);
@@ -876,7 +987,7 @@ const App = () => {
               className="w-10 h-10 cursor-pointer object-contain" 
             />
             <div className="flex flex-col">
-               <div className="flex items-center gap-1.5 cursor-pointer" onClick={() => setShowNetworks(true)}>
+               <div className="flex items-center gap-1.5">
                   <span className="text-xl font-black tracking-tighter leading-none" style={{ color: theme.primary }}>{theme.name}</span>
                   <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: theme.primary }} />
                </div>
@@ -884,9 +995,8 @@ const App = () => {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-all group" onClick={() => setShowNetworks(true)}>
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 group">
                <div style={{ color: theme.primary }} className="group-hover:scale-110 transition-transform">{chains.find(c => c.id === selectedChain)?.icon || <Globe className="w-3 h-3" />}</div>
-               <ChevronDown className="w-3 h-3 text-gray-500 group-hover:text-white transition-colors" />
             </div>
              <Settings 
                 className={`w-5 h-5 cursor-pointer transition-colors ${showSettings ? 'text-bolt-blue' : 'text-gray-400 hover:text-white'}`} 
@@ -929,8 +1039,53 @@ const App = () => {
                   </motion.div>
                 ))}
               </div>
-              <div className="mt-8 pt-8 border-t border-white/5">
+              <div className="mt-8 pt-8 border-t border-white/5 space-y-3">
+                 <Button onClick={() => setShowAddNetwork(true)} variant="glass" className="w-full py-4 rounded-2xl flex justify-center gap-2 items-center">
+                    <Plus className="w-4 h-4" /> Add Custom Network
+                 </Button>
                  <Button onClick={() => setShowNetworks(false)} className="w-full py-4 rounded-2xl">Done</Button>
+              </div>
+            </motion.div>
+          )}
+
+          {showAddNetwork && (
+            <motion.div 
+              initial={{ opacity: 0, y: 300 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 300 }}
+              className="absolute inset-x-0 bottom-0 top-[15%] z-[65] bg-[#0A0B10]/98 backdrop-blur-3xl p-8 flex flex-col rounded-t-[40px] border-t border-white/10 overflow-y-auto scrollbar-hide shadow-[0_-20px_100px_rgba(0,0,0,0.8)]"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className="text-xl font-black tracking-tight" style={{ color: theme.primary }}>Add Network</h3>
+                  <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Connect to Custom EVM</p>
+                </div>
+                <X className="w-6 h-6 text-gray-500 cursor-pointer hover:text-white transition-colors" onClick={() => setShowAddNetwork(false)} />
+              </div>
+              <div className="flex-1 space-y-4 pr-1">
+                <div>
+                   <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">Network Name *</p>
+                   <input type="text" placeholder="e.g. Sepolia" value={newNetwork.name} onChange={(e) => setNewNetwork({ ...newNetwork, name: e.target.value })} className="w-full p-4 rounded-2xl bg-white/5 border border-white/10 text-sm focus:border-[var(--theme-primary)] outline-none transition-colors" />
+                </div>
+                <div>
+                   <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">New RPC URL *</p>
+                   <input type="text" placeholder="https://..." value={newNetwork.rpc} onChange={(e) => setNewNetwork({ ...newNetwork, rpc: e.target.value })} className="w-full p-4 rounded-2xl bg-white/5 border border-white/10 text-sm focus:border-[var(--theme-primary)] outline-none transition-colors font-mono" />
+                </div>
+                <div>
+                   <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">Chain ID *</p>
+                   <input type="text" placeholder="e.g. 11155111" value={newNetwork.id} onChange={(e) => setNewNetwork({ ...newNetwork, id: e.target.value })} className="w-full p-4 rounded-2xl bg-white/5 border border-white/10 text-sm focus:border-[var(--theme-primary)] outline-none transition-colors font-mono" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">Currency Symbol *</p>
+                    <input type="text" placeholder="ETH" value={newNetwork.currencySymbol} onChange={(e) => setNewNetwork({ ...newNetwork, currencySymbol: e.target.value })} className="w-full p-4 rounded-2xl bg-white/5 border border-white/10 text-sm focus:border-[var(--theme-primary)] outline-none transition-colors" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-2">Block Explorer URL</p>
+                    <input type="text" placeholder="Optional" value={newNetwork.explorer} onChange={(e) => setNewNetwork({ ...newNetwork, explorer: e.target.value })} className="w-full p-4 rounded-2xl bg-white/5 border border-white/10 text-sm focus:border-[var(--theme-primary)] outline-none transition-colors" />
+                  </div>
+                </div>
+              </div>
+              <div className="mt-8">
+                 <Button onClick={handleAddCustomNetwork} disabled={!newNetwork.name || !newNetwork.id || !newNetwork.rpc || !newNetwork.currencySymbol} className="w-full py-4 rounded-2xl" style={{ background: `linear-gradient(to right, ${theme.primary}, ${theme.secondary})` }}>Save Network</Button>
               </div>
             </motion.div>
           )}
@@ -1250,12 +1405,16 @@ const App = () => {
               className="absolute inset-0 z-[60] bg-bolt-dark/95 text-white backdrop-blur-3xl flex flex-col font-sans"
             >
               <div className="p-6 flex flex-col h-full">
-                {/* Header with improved aesthetics */}
                 <div className="flex items-center justify-between mb-2">
                   <ArrowLeft className="w-5 h-5 text-gray-400 cursor-pointer hover:bg-white/10 rounded-full transition-all p-1 box-content" onClick={() => setShowSend(false)} />
                   <h3 className="text-base font-black tracking-tight" style={{ color: theme.primary }}>Send</h3>
-                  <div className="w-9 h-9 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center p-2" style={{ color: theme.primary }}>
-                    <Fingerprint className="w-full h-full" />
+                  <div className="flex items-center gap-2">
+                    <div className="w-9 h-9 rounded-full bg-white/5 border border-white/10 flex items-center justify-center p-2 cursor-pointer hover:bg-white/10 transition-all" style={{ color: theme.primary }} title="Bridge Assets" onClick={() => setShowBridge(true)}>
+                      <ArrowLeftRight className="w-full h-full" />
+                    </div>
+                    <div className="px-4 py-2 rounded-full bg-white/5 border border-white/10 cursor-pointer hover:bg-white/10 transition-all text-[10px] font-black uppercase tracking-widest" onClick={() => setShowSwap(true)}>
+                      Swap
+                    </div>
                   </div>
                 </div>
 
@@ -1339,9 +1498,22 @@ const App = () => {
                                chains.find(c => c.id === selectedChain)?.icon || <Globe className="w-5 h-5" />
                              )}
                           </div>
-                          <div>
+                          <div className="w-full">
                             <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-0.5">{sendTab === 'nft' ? 'Collection' : 'Asset'}</p>
-                            <p className="text-sm font-black text-white">{sendTab === 'nft' ? 'NFT Collection' : chains.find(c => c.id === selectedChain)?.name}</p>
+                            {sendTab === 'nft' ? (
+                               <p className="text-sm font-black text-white">NFT Collection</p>
+                            ) : (
+                               <select 
+                                 value={sendAsset} 
+                                 onChange={(e) => setSendAsset(e.target.value)}
+                                 className="bg-transparent text-sm font-black text-white outline-none w-full appearance-none flex-1 cursor-pointer"
+                               >
+                                  <option value="native" className="bg-[#121318] text-white">{chains.find(c => c.id === selectedChain)?.name} Native</option>
+                                  {contracts.filter(c => c.chainId === selectedChain).map(c => (
+                                     <option key={c.address} value={c.address} className="bg-[#121318] text-white">{c.name} ({contractBalances[c.address] || '0.00'})</option>
+                                  ))}
+                               </select>
+                            )}
                           </div>
                        </div>
                        <div className="text-right">
@@ -1749,9 +1921,11 @@ const App = () => {
                     <X className="w-6 h-6 text-gray-500" />
                   </button>
  
-                  <div className="text-center">
+                  <div className="text-center px-4">
                     <h3 className="text-2xl font-black text-white tracking-tight mb-2">Receive Assets</h3>
-                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">Your unique vault address</p>
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] leading-relaxed">
+                       This address accepts {chains.find(c => c.id === selectedChain)?.name} native assets and all tracked custom tokens.
+                    </p>
                   </div>
  
                   <div className="p-4 bg-white rounded-[32px] shadow-[0_0_50px_rgba(255,255,255,0.1)]">
@@ -1790,7 +1964,7 @@ const App = () => {
             </motion.div>
           )}
 
-          {showSwap && activeWallet && (
+           {showSwap && activeWallet && (
              <motion.div 
                initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
                className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-xl flex items-center justify-center p-6"
@@ -1870,6 +2044,74 @@ const App = () => {
                     style={theme.id !== 'glossy' ? { background: `linear-gradient(to right, ${theme.primary}, ${theme.secondary})` } : {}}
                   >
                     {isSwapping ? 'Swapping...' : 'Execute Swap'}
+                  </Button>
+               </motion.div>
+             </motion.div>
+           )}
+
+           {showBridge && activeWallet && (
+             <motion.div 
+               initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
+               className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-xl flex items-center justify-center p-6"
+             >
+               <motion.div className={`w-full max-w-md ${theme.id === 'glossy' ? 'glass-glossy' : 'bg-bolt-dark/95 border-white/10'} rounded-[40px] border p-8 flex flex-col gap-6 shadow-2xl relative`}>
+                  <button onClick={() => setShowBridge(false)} className="absolute top-6 right-6 p-2 rounded-full bg-white/5 hover:bg-white/10 transition-all">
+                    <X className="w-6 h-6 text-gray-500" />
+                  </button>
+
+                  <div className="text-center">
+                    <h3 className="text-2xl font-black text-white tracking-tight mb-1">Bridge Assets</h3>
+                    <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">Cross-chain liquidity highway</p>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="p-5 rounded-3xl bg-white/5 border border-white/5">
+                      <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-3">From Network</p>
+                      <select 
+                        value={bridgeFromChain} 
+                        onChange={(e) => setBridgeFromChain(e.target.value)}
+                        className="w-full bg-transparent text-lg font-black text-white outline-none mb-2"
+                      >
+                        {Object.entries(CHAINS).map(([id, cfg]) => (
+                          <option key={id} value={id}>{cfg.name}</option>
+                        ))}
+                      </select>
+                      <input 
+                        type="number" 
+                        placeholder="0.00" 
+                        value={bridgeAmount} 
+                        onChange={(e) => setBridgeAmount(e.target.value)}
+                        className="bg-transparent text-2xl font-black text-white outline-none w-full"
+                      />
+                    </div>
+
+                    <div className="flex justify-center -my-2 relative z-10">
+                      <div className="w-10 h-10 rounded-full bg-bolt-blue flex items-center justify-center border-4 border-bolt-dark shadow-xl">
+                        <ArrowDown className="w-5 h-5 text-black" />
+                      </div>
+                    </div>
+
+                    <div className="p-5 rounded-3xl bg-white/10 border border-white/10">
+                      <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-3">To Network</p>
+                      <select 
+                        value={bridgeToChain} 
+                        onChange={(e) => setBridgeToChain(e.target.value)}
+                        className="w-full bg-transparent text-lg font-black text-white outline-none"
+                      >
+                        {Object.entries(CHAINS).map(([id, cfg]) => (
+                          <option key={id} value={id}>{cfg.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <Button 
+                    onClick={handleExecuteBridge} 
+                    disabled={isBridging || !bridgeAmount} 
+                    className={`w-full py-5 rounded-[24px] font-black uppercase tracking-widest text-sm shadow-2xl ${theme.id === 'glossy' ? 'glossy-button' : ''}`}
+                    style={theme.id !== 'glossy' ? { background: `linear-gradient(to right, ${theme.primary}, ${theme.secondary})` } : {}}
+                  >
+                    {isBridging ? 'Bridging...' : 'Initiate Bridge'}
                   </Button>
                </motion.div>
              </motion.div>
@@ -2060,8 +2302,24 @@ const App = () => {
               <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: theme.primary }}>Total Assets</p>
               <h2 className="text-3xl font-black text-white leading-none">{totalUSD}</h2>
             </div>
-            <div className="p-3 rounded-2xl border transition-all cursor-pointer hover:rotate-12" style={{ backgroundColor: `${theme.primary}10`, borderColor: `${theme.primary}30` }} onClick={() => setShowNetworks(true)}>
-              <Fingerprint className="w-6 h-6" style={{ color: theme.primary }} />
+            <div className="flex items-center gap-3">
+              <div className="flex flex-col items-center gap-1">
+                <div 
+                  className="w-10 h-10 rounded-full bg-white/10 border border-white/10 flex items-center justify-center cursor-pointer hover:bg-white/20 hover:border-white/20 transition-all shadow-lg group active:scale-90"
+                  onClick={() => setShowBridge(true)}
+                  title="Bridge Assets"
+                >
+                  <ArrowLeftRight className="w-[18px] h-[18px] text-white/70 group-hover:text-white transition-colors" />
+                </div>
+                <span className="text-[8px] font-black uppercase tracking-widest text-white/50">Bridge</span>
+              </div>
+              <button 
+                className="flex items-center gap-2.5 px-7 py-3 rounded-full bg-black text-white border border-white/5 hover:bg-white/5 transition-all shadow-2xl active:scale-95 group"
+                onClick={() => setShowSwap(true)}
+              >
+                <RefreshCw className="w-4 h-4 text-white group-hover:rotate-180 transition-transform duration-700" />
+                <span className="text-xs font-black uppercase tracking-widest">Swap</span>
+              </button>
             </div>
           </div>
           <div className="flex items-center gap-2">

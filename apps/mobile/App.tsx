@@ -36,6 +36,13 @@ export default function App() {
   const [swapQuote, setSwapQuote] = useState<any>(null);
   const [isSwapping, setIsSwapping] = useState(false);
 
+  // Bridge state
+  const [showBridge, setShowBridge] = useState(false);
+  const [bridgeFromChain, setBridgeFromChain] = useState('ethereum');
+  const [bridgeToChain, setBridgeToChain] = useState('monad');
+  const [bridgeAmount, setBridgeAmount] = useState('');
+  const [isBridging, setIsBridging] = useState(false);
+
   useEffect(() => {
     (async () => {
       const { status } = await BarCodeScanner.requestPermissionsAsync();
@@ -101,12 +108,7 @@ export default function App() {
     if (!wallet || !swapQuote) return;
     setIsSwapping(true);
     try {
-      const hash = await core.executeSwap(wallet.id, {
-        fromAsset: swapFromAsset,
-        toAsset: swapToAsset,
-        fromAmount: swapAmount,
-        ...swapQuote
-      });
+      const hash = await core.executeSwap(wallet.id, swapQuote);
       alert('Swap Successful!\n' + hash);
       setShowSwap(false);
       setSwapQuote(null);
@@ -120,12 +122,20 @@ export default function App() {
 
   const handleGetQuote = async (val: string) => {
     setSwapAmount(val);
-    if (!val || isNaN(parseFloat(val))) {
+    if (!val || isNaN(parseFloat(val)) || !wallet) {
       setSwapQuote(null);
       return;
     }
     try {
-      const quote = await core.getSwapQuote(swapFromAsset, swapToAsset, val);
+      const quote = await core.getSwapQuote({
+        fromChainKey: 'ethereum',
+        toChainKey: 'ethereum',
+        fromToken: swapFromAsset,
+        toToken: swapToAsset,
+        fromAmount: val,
+        fromAddress: wallet.address,
+        slippage: 0.005,
+      });
       setSwapQuote(quote);
     } catch (err) {
       console.error(err);
@@ -135,6 +145,30 @@ export default function App() {
   const handleBarCodeScanned = ({ data }: { data: string }) => {
     setShowScanner(false);
     setRecipient(data);
+  };
+
+  const handleExecuteBridge = async () => {
+    if (!wallet || !bridgeAmount) return;
+    setIsBridging(true);
+    try {
+      const quote = await core.getBridgeQuote({
+        fromChainKey: bridgeFromChain,
+        toChainKey: bridgeToChain,
+        fromToken: 'native',
+        toToken: 'native',
+        fromAmount: bridgeAmount,
+        fromAddress: wallet.address,
+        slippage: 0.005,
+      });
+      const hash = await core.executeBridge(wallet.id, quote);
+      alert('Bridge Successful!\n' + hash);
+      setShowBridge(false);
+      setBridgeAmount('');
+    } catch (err) {
+      alert('Bridge Failed: ' + (err as Error).message);
+    } finally {
+      setIsBridging(false);
+    }
   };
 
   const copyToClipboard = () => {
@@ -185,6 +219,9 @@ export default function App() {
               </TouchableOpacity>
               <TouchableOpacity onPress={() => setShowSwap(true)} style={[styles.actionBtn, { borderColor: '#00d2ff', borderWidth: 1 }]}>
                 <Text style={[styles.actionBtnText, { color: '#00d2ff' }]}>SWAP</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowBridge(true)} style={[styles.actionBtn, { borderColor: '#555', borderWidth: 1 }]}>
+                <Text style={[styles.actionBtnText, { color: '#aaa' }]}>BRIDGE</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -308,6 +345,59 @@ export default function App() {
               disabled={isSwapping || !swapQuote}
             >
               {isSwapping ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>EXECUTE SWAP</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Bridge Modal */}
+      <Modal visible={showBridge} animationType="slide" transparent>
+        <View style={styles.modalBg}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Bridge Assets</Text>
+              <TouchableOpacity onPress={() => setShowBridge(false)}><Text style={styles.closeBtn}>×</Text></TouchableOpacity>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>From Network</Text>
+              <View style={styles.assetInput}>
+                <Text style={styles.assetName}>{bridgeFromChain.toUpperCase()}</Text>
+                <TextInput 
+                  style={[styles.input, { textAlign: 'right' }]} 
+                  value={bridgeAmount} 
+                  onChangeText={setBridgeAmount}
+                  keyboardType="numeric"
+                  placeholder="0.00"
+                  placeholderTextColor="#444"
+                />
+              </View>
+            </View>
+
+            <View style={{ alignItems: 'center', marginVertical: -10, zIndex: 10 }}>
+              <View style={styles.arrowCircle}>
+                <Text style={{ color: '#fff' }}>↓</Text>
+              </View>
+            </View>
+
+            <View style={[styles.inputGroup, { marginTop: 20 }]}>
+              <Text style={styles.label}>To Network</Text>
+              <View style={styles.assetInput}>
+                <Text style={styles.assetName}>{bridgeToChain.toUpperCase()}</Text>
+                <View style={{ flex: 1, padding: 20, alignItems: 'flex-end' }}>
+                  <Text style={{ color: '#fff', fontSize: 18, fontWeight: '900' }}>
+                    {bridgeAmount || '0.00'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <TouchableOpacity 
+              style={[styles.button, { marginTop: 24, backgroundColor: (isBridging || !bridgeAmount) ? '#111' : '#00d2ff' }]} 
+              onPress={handleExecuteBridge}
+              disabled={isBridging || !bridgeAmount}
+            >
+              {isBridging ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>INITIATE BRIDGE</Text>}
             </TouchableOpacity>
           </View>
         </View>

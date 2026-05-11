@@ -1,13 +1,15 @@
 // Boltwallet Extension Content Script
 // Injects the provider script into the page to enable dApp interaction.
 // @ts-ignore
-const chrome = (globalThis as any).chrome;
+const _chrome = (globalThis as any).chrome || (window as any).chrome;
+// Use _chrome throughout or just rely on the global chrome object.
+// For safety across different environments, we'll use _chrome.
 
 function injectProvider() {
   try {
     const script = document.createElement('script');
     // @ts-ignore
-    script.src = chrome.runtime.getURL('provider.js');
+    script.src = _chrome.runtime.getURL('provider.js');
     script.setAttribute('async', 'false');
     (document.head || document.documentElement).appendChild(script);
     script.onload = () => {
@@ -37,13 +39,13 @@ window.addEventListener('message', (event) => {
 
     // Relay to background
     // @ts-ignore
-    chrome.runtime.sendMessage({ 
+    _chrome.runtime.sendMessage({ 
       type: 'BOLT_RPC_REQUEST', 
       id, 
       payload 
     }, (response: any) => {
-      if (chrome.runtime.lastError) {
-        console.error('Boltwallet: Background communication failed', chrome.runtime.lastError);
+      if (_chrome.runtime.lastError) {
+        console.error('Boltwallet: Background communication failed', _chrome.runtime.lastError);
         return;
       }
 
