@@ -8,9 +8,16 @@
     "dev": "tsc -w"
   },
   "dependencies": {
-    "@open-wallet-standard/core": "latest",
     "@lifi/sdk": "^3.0.0",
-    "ethers": "^6.0.0"
+    "@mysten/sui": "^2.16.2",
+    "@open-wallet-standard/core": "latest",
+    "axios": "^1.16.0",
+    "bip32": "^5.0.1",
+    "bip39": "^3.1.0",
+    "bitcoinjs-lib": "^7.0.1",
+    "ecpair": "^3.0.1",
+    "ethers": "^6.0.0",
+    "tiny-secp256k1": "^2.2.4"
   },
   "devDependencies": {
     "typescript": "^5.0.0"

@@ -13,6 +13,29 @@ const FingerprintIcon = () => <View style={styles.iconCircle}><Text style={{ col
 
 const core = new BoltwalletCore();
 
+const parseQRPayloadMobile = (raw: string): { type: string; address?: string; name?: string; chainId?: string; decimals?: number; abiCid?: string } | null => {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('boltxr://contract')) {
+    try {
+      const url = new URL(trimmed.replace('boltxr://', 'https://boltxr.local/'));
+      return {
+        type: 'contract',
+        address: url.searchParams.get('addr') || '',
+        name: url.searchParams.get('name') || '',
+        decimals: parseInt(url.searchParams.get('dec') || '18', 10),
+        chainId: url.searchParams.get('chain') || 'ethereum',
+        abiCid: url.searchParams.get('cid') || '',
+      };
+    } catch { return null; }
+  }
+  if (trimmed.startsWith('ethereum:')) {
+    return { type: 'address', address: trimmed.replace('ethereum:', '').split(/[@?/]/)[0] };
+  }
+  if (/^0x[a-fA-F0-9]{40}$/.test(trimmed)) return { type: 'address', address: trimmed };
+  if (/^(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,62}$/.test(trimmed)) return { type: 'address', address: trimmed, chainId: 'bitcoin' };
+  return { type: 'address', address: trimmed };
+};
+
 export default function App() {
   const [isCreating, setIsCreating] = useState(false);
   const [wallet, setWallet] = useState<any>(null);
@@ -43,10 +66,22 @@ export default function App() {
   const [bridgeAmount, setBridgeAmount] = useState('');
   const [isBridging, setIsBridging] = useState(false);
 
+  // Lock/unlock state
+  const [isLocked, setIsLocked] = useState(true);
+  const [password, setPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [isVaultSetup, setIsVaultSetup] = useState(false);
+  const [nativeBalance, setNativeBalance] = useState('0.00');
+  const [history, setHistory] = useState<any[]>([]);
+  const [contractImportMsg, setContractImportMsg] = useState('');
+
   useEffect(() => {
     (async () => {
       const { status } = await BarCodeScanner.requestPermissionsAsync();
       setHasPermission(status === 'granted');
+      const setup = await core.isVaultSetup();
+      setIsVaultSetup(setup);
+      if (!setup) setIsLocked(true);
     })();
   }, []);
 
@@ -76,12 +111,33 @@ export default function App() {
     try {
       const newWallet = await core.createNewWallet("Mobile User");
       setWallet(newWallet);
+      // Fetch balance immediately
+      try {
+        const bal = await core.getNativeBalance(newWallet.address);
+        setNativeBalance(bal);
+      } catch {}
     } catch (err) {
       console.error(err);
     } finally {
       setIsCreating(false);
     }
   };
+
+  // Periodic balance/history sync
+  useEffect(() => {
+    if (!wallet || isLocked) return;
+    const sync = async () => {
+      try {
+        const bal = await core.getNativeBalance(wallet.address);
+        setNativeBalance(bal);
+        const hist = await core.getHistory(wallet.address, 'all');
+        setHistory(hist.slice(0, 5));
+      } catch {}
+    };
+    sync();
+    const interval = setInterval(sync, 15000);
+    return () => clearInterval(interval);
+  }, [wallet, isLocked]);
 
   const handleSend = async () => {
     if (!wallet) return;
@@ -144,7 +200,16 @@ export default function App() {
 
   const handleBarCodeScanned = ({ data }: { data: string }) => {
     setShowScanner(false);
-    setRecipient(data);
+    const parsed = parseQRPayloadMobile(data);
+    if (parsed?.type === 'contract' && parsed.address) {
+      // Auto-import scanned contract
+      setContractImportMsg(`Importing contract: ${parsed.name || parsed.address}`);
+      core.importContract(parsed.name || 'Scanned Contract', parsed.address, '[]', parsed.decimals || 18)
+        .then(() => setContractImportMsg(`✓ Imported ${parsed.name || parsed.address}`))
+        .catch((e: Error) => setContractImportMsg(`✗ ${e.message}`));
+    } else if (parsed?.address) {
+      setRecipient(parsed.address);
+    }
   };
 
   const handleExecuteBridge = async () => {
@@ -209,7 +274,7 @@ export default function App() {
 
           <View style={styles.balanceCard}>
             <Text style={styles.balanceLabel}>Total Liquidity</Text>
-            <Text style={styles.balanceValue}>$1,248.50</Text>
+            <Text style={styles.balanceValue}>${parseFloat(nativeBalance).toFixed(2)}</Text>
             <View style={styles.actionRow}>
               <TouchableOpacity onPress={() => setShowSend(true)} style={[styles.actionBtn, { backgroundColor: '#00d2ff' }]}>
                 <Text style={styles.actionBtnText}>SEND</Text>
@@ -227,16 +292,24 @@ export default function App() {
           </View>
 
           <Text style={styles.sectionTitle}>Recent Activity</Text>
-          {[1, 2].map((i) => (
+          {history.length > 0 ? history.map((h: any, i: number) => (
             <View key={i} style={styles.txRow}>
               <View style={styles.txIcon}><Text style={{ color: '#fff' }}>⚡</Text></View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.txTitle}>Security Sync</Text>
-                <Text style={styles.txSub}>Complete · Ethereum</Text>
+                <Text style={styles.txTitle}>{h.type === 'send' ? 'Sent' : h.type === 'contract_call' ? 'Contract Call' : 'Received'}</Text>
+                <Text style={styles.txSub}>{h.status} · {h.chainId}</Text>
               </View>
-              <Text style={styles.txValue}>+$0.00</Text>
+              <Text style={styles.txValue}>{h.value} {h.asset}</Text>
             </View>
-          ))}
+          )) : (
+            <View style={styles.txRow}>
+              <View style={styles.txIcon}><Text style={{ color: '#fff' }}>⚡</Text></View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.txTitle}>No transactions yet</Text>
+                <Text style={styles.txSub}>Send or receive to get started</Text>
+              </View>
+            </View>
+          )}
         </ScrollView>
       )}
 

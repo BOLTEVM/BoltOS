@@ -5,7 +5,6 @@ import {
   Send, 
   Shield, 
   Cpu, 
-  Globe, 
   Zap, 
   Copy, 
   Trash2, 
@@ -36,11 +35,12 @@ import {
   Download,
   Activity,
   ArrowDown,
-  ArrowLeftRight
+  ArrowLeftRight,
+  GitMerge
 } from 'lucide-react';
 import { Button } from '@boltwallet/ui';
 import { NetworkIcon } from './components/NetworkIcons';
-import { WalletData, ContractData, NFTData, CHAINS, HistoryData, LogEvent, BoltwalletCore, SwapQuote, SwapQuoteParams } from './ows/ows-core';
+import { WalletData, ContractData, NFTData, CHAINS, HistoryData, LogEvent, BoltwalletCore, SwapQuote, SwapQuoteParams, parseQRPayload, fetchFromIPFS, fetchABI } from './ows/ows-core';
 import { ethers } from 'ethers';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { QRCodeSVG } from 'qrcode.react';
@@ -229,7 +229,7 @@ const App = () => {
 
   const chains = [
     ...baseChains,
-    ...customNetworks.map(cn => ({ id: cn.id, name: cn.name, icon: <Globe className="w-4 h-4" /> }))
+    ...customNetworks.map(cn => ({ id: cn.id, name: cn.name, icon: <ArrowLeftRight className="w-4 h-4" /> }))
   ];
 
   useEffect(() => {
@@ -995,21 +995,58 @@ const App = () => {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 group">
-               <div style={{ color: theme.primary }} className="group-hover:scale-110 transition-transform">{chains.find(c => c.id === selectedChain)?.icon || <Globe className="w-3 h-3" />}</div>
-            </div>
-             <Settings 
-                className={`w-5 h-5 cursor-pointer transition-colors ${showSettings ? 'text-bolt-blue' : 'text-gray-400 hover:text-white'}`} 
-                onClick={async () => {
-                   if (showSettings) {
-                      setMnemonic('');
-                      setShowMnemonicPlain(false);
-                   }
-                   setShowSettings(!showSettings);
+            {/* Custom Swap & Bridge Widget */}
+            <div className="flex items-center gap-1.5 p-1 rounded-full bg-white/5 border border-white/10 shadow-lg">
+              {/* Circular Bridge Button with Tooltip */}
+              <div className="relative group">
+                <button
+                  onClick={() => {
+                    if (wallets.length > 0) {
+                      if (!activeWallet) setActiveWallet(wallets[0]);
+                      setShowBridge(true);
+                    } else {
+                      alert("Please setup or unlock your vault first.");
+                    }
+                  }}
+                  className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 flex items-center justify-center transition-all duration-200 active:scale-90"
+                >
+                  <GitMerge className="w-3.5 h-3.5 text-white/90 rotate-90" />
+                </button>
+                {/* Tooltip */}
+                <div className="absolute top-10 left-1/2 -translate-x-1/2 scale-0 group-hover:scale-100 transition-all duration-150 bg-black/90 border border-white/10 px-2 py-1 rounded text-[10px] font-bold text-white whitespace-nowrap shadow-2xl z-50">
+                  Bridge
+                </div>
+              </div>
+
+              {/* Capsule Swap Button */}
+              <button
+                onClick={() => {
+                  if (wallets.length > 0) {
+                    if (!activeWallet) setActiveWallet(wallets[0]);
+                    setShowSwap(true);
+                  } else {
+                    alert("Please setup or unlock your vault first.");
+                  }
                 }}
-                style={{ color: showSettings ? theme.primary : undefined }}
-             />
-             <X className="w-5 h-5 text-gray-400 hover:text-white cursor-pointer transition-colors" />
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-black/90 hover:bg-black text-white border border-white/10 transition-all duration-200 active:scale-95 text-xs font-bold shadow-inner"
+              >
+                <ArrowLeftRight className="w-3 h-3 text-bolt-blue" />
+                <span>Swap</span>
+              </button>
+            </div>
+
+            <Settings 
+               className={`w-5 h-5 cursor-pointer transition-colors ${showSettings ? 'text-bolt-blue' : 'text-gray-400 hover:text-white'}`} 
+               onClick={async () => {
+                  if (showSettings) {
+                     setMnemonic('');
+                     setShowMnemonicPlain(false);
+                  }
+                  setShowSettings(!showSettings);
+               }}
+               style={{ color: showSettings ? theme.primary : undefined }}
+            />
+            <X className="w-5 h-5 text-gray-400 hover:text-white cursor-pointer transition-colors" />
           </div>
         </div>
 
@@ -1439,7 +1476,7 @@ const App = () => {
                 {/* Network Selector refined */}
                 <div className="flex items-center gap-2 mb-6 px-3 py-2 rounded-xl bg-white/5 border border-white/5 cursor-pointer hover:bg-white/10 transition-all w-fit group">
                   <div className="w-5 h-5 rounded-full bg-white/5 flex items-center justify-center overflow-hidden">
-                    {chains.find(c => c.id === selectedChain)?.icon || <Globe className="w-3 h-3" />}
+                    {chains.find(c => c.id === selectedChain)?.icon || <ArrowLeftRight className="w-3 h-3" />}
                   </div>
                   <span className="text-[10px] font-black uppercase tracking-widest text-gray-400 group-hover:text-white transition-colors">{chains.find(c => c.id === selectedChain)?.name}</span>
                   <ChevronDown className="w-3 h-3 text-gray-500 group-hover:text-white transition-all" />
@@ -1495,7 +1532,7 @@ const App = () => {
                              {sendTab === 'nft' ? (
                                <div className="w-full h-full flex items-center justify-center text-[8px] font-black opacity-40">NFT</div>
                              ) : (
-                               chains.find(c => c.id === selectedChain)?.icon || <Globe className="w-5 h-5" />
+                               chains.find(c => c.id === selectedChain)?.icon || <ArrowLeftRight className="w-5 h-5" />
                              )}
                           </div>
                           <div className="w-full">
@@ -1590,7 +1627,7 @@ const App = () => {
                    <div className="absolute top-0 right-0 w-24 h-24 bg-white/5 blur-2xl rounded-full -mr-12 -mt-12" />
                    <div className="flex items-center gap-4 relative z-10">
                       <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center p-2.5 shadow-inner" style={{ color: theme.primary }}>
-                         {sendTab === 'nft' ? <Zap className="w-6 h-6" /> : (chains.find(c => c.id === selectedChain)?.icon || <Globe className="w-6 h-6" />)}
+                         {sendTab === 'nft' ? <Zap className="w-6 h-6" /> : (chains.find(c => c.id === selectedChain)?.icon || <ArrowLeftRight className="w-6 h-6" />)}
                       </div>
                       <div>
                           <p className="text-2xl font-black text-white leading-none mb-1">-{proposedTx.value} {sendTab === 'nft' ? 'NFT' : (chains.find(c => c.id === selectedChain)?.name === 'Ethereum' ? 'ETH' : chains.find(c => c.id === selectedChain)?.name?.split(' ')[0])}</p>
@@ -1906,7 +1943,28 @@ const App = () => {
  
           {showQRScanner && (
             <QRScannerOverlay 
-              onScan={(text) => setRecipient(text)} 
+              onScan={async (text) => {
+                const payload = parseQRPayload(text);
+                if (payload?.type === 'contract') {
+                  // Auto-import contract from QR scan
+                  try {
+                    let abi = '[]';
+                    if (payload.abiCid) {
+                      const fetched = await fetchFromIPFS(payload.abiCid);
+                      if (fetched) abi = fetched;
+                    }
+                    await core.importContract(payload.name, payload.address, abi, payload.decimals);
+                    core.listContracts().then(setContracts);
+                    alert(`Contract "${payload.name}" imported successfully!`);
+                  } catch (e: any) {
+                    alert(`Failed to import contract: ${e.message}`);
+                  }
+                } else if (payload?.type === 'address') {
+                  setRecipient(payload.address);
+                } else {
+                  setRecipient(text);
+                }
+              }} 
               onClose={() => setShowQRScanner(false)} 
             />
           )}
@@ -2356,7 +2414,7 @@ const App = () => {
             {showContracts ? (
               contracts.length === 0 ? (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-10 rounded-[32px] bg-white/5 border border-dashed border-white/10 text-center flex flex-col items-center justify-center gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-gray-500"><Globe className="w-6 h-6" /></div>
+                  <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-gray-500"><Cpu className="w-6 h-6" /></div>
                   <p className="text-gray-500 text-xs text-center leading-relaxed font-medium">No custom contracts imported. Add your first smart contract to interact.</p>
                 </motion.div>
               ) : (
@@ -2540,6 +2598,12 @@ const App = () => {
                         className="px-4 py-2 rounded-xl border text-[10px] font-black hover:scale-105 active:scale-95 transition-all uppercase flex items-center gap-2 shadow-inner bg-white/5 border-white/10 text-white"
                       >
                         <RefreshCw className="w-3.5 h-3.5 text-bolt-blue" />Swap
+                      </button>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setActiveWallet(w); setShowBridge(true); }}
+                        className="px-4 py-2 rounded-xl border text-[10px] font-black hover:scale-105 active:scale-95 transition-all uppercase flex items-center gap-2 shadow-inner bg-white/5 border-white/10 text-white"
+                      >
+                        <ArrowLeftRight className="w-3.5 h-3.5 text-purple-400" />Bridge
                       </button>
                     </div>
                   </motion.div>

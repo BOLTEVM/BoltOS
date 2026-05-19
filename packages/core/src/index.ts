@@ -66,6 +66,8 @@ export type {
   RouteStep,
 } from "./swap";
 
+export * from './providers';
+
 export interface WalletData {
   id: string;
   name: string;

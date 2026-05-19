@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Boltwallet",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Premium Multi-Chain Wallet powered by OWS with Hardened Security.",
   "action": {
     "default_popup": "index.html",
@@ -21,7 +21,7 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://*.li.quest https://api.lifi.gateway.fm https://*.ninerealms.com https://*.thorchain.info https://api.1inch.dev https://hermes.pyth.network https://rpc.ankr.com https://rpc.pulsechain.com https://quaiscan.io https://rpc-evm-sidechain.xrpl.org https://rpc.bittorrentchain.io https://rpc.coredao.org;"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://*.li.quest https://api.lifi.gateway.fm https://*.ninerealms.com https://*.thorchain.info https://api.1inch.dev https://hermes.pyth.network https://rpc.ankr.com https://rpc.pulsechain.com https://quaiscan.io https://rpc-evm-sidechain.xrpl.org https://rpc.bittorrentchain.io https://rpc.coredao.org https://sourcify.dev https://api.etherscan.io https://api.bscscan.com https://api.polygonscan.com https://api.scan.pulsechain.com https://openapi.coredao.org https://ipfs.io https://gateway.pinata.cloud https://cloudflare-ipfs.com https://dweb.link https://api.pinata.cloud https://blockstream.info;"
   },
   "host_permissions": [
     "*://*/*",
@@ -36,7 +36,19 @@
     "https://quaiscan.io/*",
     "https://rpc-evm-sidechain.xrpl.org/*",
     "https://rpc.bittorrentchain.io/*",
-    "https://rpc.coredao.org/*"
+    "https://rpc.coredao.org/*",
+    "https://sourcify.dev/*",
+    "https://api.etherscan.io/*",
+    "https://api.bscscan.com/*",
+    "https://api.polygonscan.com/*",
+    "https://api.scan.pulsechain.com/*",
+    "https://openapi.coredao.org/*",
+    "https://ipfs.io/*",
+    "https://gateway.pinata.cloud/*",
+    "https://cloudflare-ipfs.com/*",
+    "https://dweb.link/*",
+    "https://api.pinata.cloud/*",
+    "https://blockstream.info/*"
   ],
   "icons": {
     "128": "logo.png"

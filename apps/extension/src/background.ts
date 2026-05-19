@@ -41,7 +41,8 @@ const CHAINS_RPC: Record<string, string> = {
   bitcoin: "https://rpc.ankr.com/btc",
   sui: "https://rpc.ankr.com/sui",
   xrpl_evm: "https://rpc-evm-sidechain.xrpl.org",
-  tron_evm: "https://rpc.bittorrentchain.io"
+  tron_evm: "https://rpc.bittorrentchain.io",
+  coredao: "https://rpc.coredao.org"
 };
 
 // @ts-ignore
@@ -88,7 +89,7 @@ _chrome.runtime.onMessage.addListener((message: any, sender: any, sendResponse: 
     const { id, payload } = message;
     
     // BOLT-SECURITY: RPC Method Validation
-    const SENSITIVE_METHODS = ['eth_sendTransaction', 'personal_sign', 'eth_sign', 'eth_signTypedData_v4', 'eth_sendRawTransaction'];
+    const SENSITIVE_METHODS = ['eth_sendTransaction', 'personal_sign', 'eth_sign', 'eth_signTypedData_v4', 'eth_sendRawTransaction', 'sui_executeTransactionBlock'];
     const PUBLIC_METHODS = [
       'eth_accounts', 'eth_chainId', 'net_version', 'eth_blockNumber', 
       'eth_getBalance', 'eth_gasPrice', 'eth_estimateGas', 'eth_call', 

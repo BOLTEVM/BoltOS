@@ -1,6 +1,11 @@
 import { ethers, wordlists } from 'ethers';
 import { LangEn } from 'ethers/wordlists';
 import { CHAINS as CORE_CHAINS } from "@/ows/chains";
+import { BitcoinProvider, SuiProvider, EVMProvider } from '@boltwallet/core';
+import { parseQRPayload, fetchFromIPFS, uploadToIPFS, buildContractURI } from './qr-codec';
+import { fetchABI, parseABIMethods } from './abi-fetcher';
+export { parseQRPayload, fetchFromIPFS, buildContractURI };
+export { fetchABI, parseABIMethods };
 
 // BOLT-09: Robust wordlist resolution to prevent "FAILED" errors in minified builds
 // We explicitly register the English wordlist into the global ethers wordlists.
@@ -111,6 +116,22 @@ export interface WalletData {
 }
 
 let sessionMnemonic: string | null = null;
+let sessionPassword: string | null = null;
+let sessionLastActivity: number = 0;
+const SESSION_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes auto-lock
+
+// SEC-01: Session timeout — auto-lock after inactivity
+const touchSession = () => { sessionLastActivity = Date.now(); };
+const isSessionExpired = () => {
+  if (!sessionMnemonic) return true;
+  if (Date.now() - sessionLastActivity > SESSION_TIMEOUT_MS) {
+    logEvent('security', 'Session expired — vault auto-locked', 'warning');
+    sessionMnemonic = null;
+    sessionPassword = null;
+    return true;
+  }
+  return false;
+};
 
 // ── LI.FI API Integration ──────────────────────────────────────
 const LIFI_API_BASE = "https://li.quest/v1";
@@ -280,14 +301,46 @@ export class BoltwalletCore {
   getLogs() { return getLogs(); }
 
   /**
-   * Execute a transaction and broadcast. CRITICAL: errors propagate, no fake hashes.
+   * Execute a transaction and broadcast. Supports EVM, Bitcoin, and Sui.
    */
   async executeTransaction(walletId: string, txData: any): Promise<string> {
-    const result = await this.signTransaction(walletId, txData);
+    const vault = await getVault();
+    const w = vault.wallets.find((x: any) => x.id === walletId || x.name === walletId);
+    if (!w) throw new Error("Wallet not found");
+    if (!sessionMnemonic) throw new Error("Wallet is locked. Session mnemonic required to sign.");
+
     const rpc = CHAINS[this.chainId as keyof typeof CHAINS]?.rpc || '';
-    const provider = new ethers.JsonRpcProvider(rpc);
-    const response = await provider.broadcastTransaction(result.signature);
-    return response.hash;
+    let hash = '';
+
+    if (this.chainId === 'bitcoin') {
+      const provider = new BitcoinProvider();
+      hash = await provider.signAndBroadcast(txData, sessionMnemonic, w.index, rpc);
+    } else if (this.chainId === 'sui') {
+      const provider = new SuiProvider();
+      hash = await provider.signAndBroadcast(txData, sessionMnemonic, w.index, rpc);
+    } else {
+      const provider = new EVMProvider(DERIVATION_PATHS[this.chainId] || "m/44'/60'/0'/0/");
+      hash = await provider.signAndBroadcast(txData, sessionMnemonic, w.index, rpc);
+    }
+
+    // Add to history
+    const from = deriveAddress(sessionMnemonic, w.index);
+    const newHistory: HistoryData = {
+      hash,
+      type: txData.data && txData.data !== '0x' && txData.to ? 'contract_call' : 'send',
+      from,
+      to: txData.to || '',
+      value: txData.value || '0',
+      asset: this.chainId === 'ethereum' ? 'ETH' : this.chainId.toUpperCase(),
+      usdValue: '0.00',
+      timestamp: new Date().toISOString(),
+      chainId: this.chainId,
+      status: 'success'
+    };
+    vault.history = [newHistory, ...(vault.history || [])];
+    await saveVault(vault);
+
+    return hash;
   }
 
   /**
@@ -363,6 +416,9 @@ export class BoltwalletCore {
 }
 
 // Crypto Helpers
+// SEC-02: Increased PBKDF2 iterations from 100K to 600K per OWASP 2023 guidance
+const PBKDF2_ITERATIONS = 600000;
+
 const deriveKey = async (password: string, salt: Uint8Array) => {
   const encoder = new TextEncoder();
   const passwordKey = await crypto.subtle.importKey(
@@ -376,7 +432,7 @@ const deriveKey = async (password: string, salt: Uint8Array) => {
     {
       name: 'PBKDF2',
       salt: salt as any,
-      iterations: 100000,
+      iterations: PBKDF2_ITERATIONS,
       hash: 'SHA-256'
     },
     passwordKey,
@@ -456,24 +512,55 @@ const validateTransactionPayload = (tx: any) => {
   }
 };
 
+// SEC-18: Full vault encryption — encrypt entire vault structure, not just mnemonic.
+// Only the 'isSetup' flag and encryption params are stored in cleartext.
+interface EncryptedVaultEnvelope {
+  encrypted: string;   // AES-GCM encrypted JSON of VaultData
+  salt: string;
+  iv: string;
+  isSetup: boolean;
+}
+
+const getVaultEnvelope = (): EncryptedVaultEnvelope | null => {
+  if (typeof window === 'undefined') return null;
+  const data = localStorage.getItem(VAULT_KEY);
+  if (!data) return null;
+  try {
+    const parsed = JSON.parse(data);
+    // Migration: detect legacy vault format (has 'encryptedMnemonic' key)
+    if (parsed.encryptedMnemonic !== undefined) return null;
+    return parsed as EncryptedVaultEnvelope;
+  } catch { return null; }
+};
+
+const getLegacyVault = (): VaultData | null => {
+  if (typeof window === 'undefined') return null;
+  const data = localStorage.getItem(VAULT_KEY);
+  if (!data) return null;
+  try {
+    const parsed = JSON.parse(data);
+    if (parsed.encryptedMnemonic !== undefined) return parsed as VaultData;
+    return null;
+  } catch { return null; }
+};
+
 const getVault = async (): Promise<VaultData> => {
-  // Try chromium extension storage first
-  if (typeof window !== 'undefined' && (window as any).chrome?.storage?.local) {
-    return new Promise((resolve) => {
-      (window as any).chrome.storage.local.get([VAULT_KEY], (result: any) => {
-        if (result[VAULT_KEY]) {
-          resolve(result[VAULT_KEY]);
-        } else {
-          resolve(initializeVault());
-        }
-      });
-    });
+  if (typeof window === 'undefined') return initializeVault();
+
+  // Try new encrypted envelope format first
+  const envelope = getVaultEnvelope();
+  if (envelope && envelope.isSetup && sessionPassword) {
+    try {
+      const decrypted = await decryptData(envelope.encrypted, envelope.salt, envelope.iv, sessionPassword);
+      return JSON.parse(decrypted);
+    } catch {
+      return initializeVault();
+    }
   }
 
-  const data = localStorage.getItem(VAULT_KEY);
-  if (data) {
-    return JSON.parse(data);
-  }
+  // Legacy migration: old format with only mnemonic encrypted
+  const legacy = getLegacyVault();
+  if (legacy) return legacy;
 
   return initializeVault();
 };
@@ -489,49 +576,96 @@ const initializeVault = () => {
     nfts: [],
     history: []
   };
-  saveVault(newData);
   return newData;
 };
 
 export const setupVault = async (password: string): Promise<string> => {
   const wallet = ethers.Wallet.createRandom();
   const mnemonic = wallet.mnemonic?.phrase || '';
-  const encrypted = await encryptData(mnemonic, password);
+  if (!mnemonic) throw new Error('Failed to generate mnemonic');
 
-  const vault = await getVault();
-  vault.encryptedMnemonic = encrypted.encrypted;
-  vault.salt = encrypted.salt;
-  vault.iv = encrypted.iv;
-  vault.isEncrypted = true;
+  const vault: VaultData = {
+    encryptedMnemonic: '',
+    salt: '',
+    iv: '',
+    isEncrypted: true,
+    wallets: [],
+    contracts: [],
+    nfts: [],
+    history: []
+  };
+  // Store mnemonic inside the vault structure itself
+  (vault as any).__mnemonic = mnemonic;
 
-  await saveVault(vault);
   sessionMnemonic = mnemonic;
+  sessionPassword = password;
+  touchSession();
+  await saveVault(vault);
   return mnemonic;
 };
 
 export const unlockVault = async (password: string): Promise<boolean> => {
-  const vault = await getVault();
-  if (!vault.isEncrypted) return false;
-  try {
-    sessionMnemonic = await decryptData(vault.encryptedMnemonic, vault.salt, vault.iv, password);
-    return true;
-  } catch (e) {
-    return false;
+  // Try new encrypted envelope format first
+  const envelope = getVaultEnvelope();
+  if (envelope && envelope.isSetup) {
+    try {
+      const decrypted = await decryptData(envelope.encrypted, envelope.salt, envelope.iv, password);
+      const vault = JSON.parse(decrypted);
+      sessionMnemonic = vault.__mnemonic || null;
+      sessionPassword = password;
+      touchSession();
+      return !!sessionMnemonic;
+    } catch { return false; }
   }
+
+  // Legacy fallback: old format with encryptedMnemonic
+  const legacy = getLegacyVault();
+  if (legacy && legacy.isEncrypted) {
+    try {
+      sessionMnemonic = await decryptData(legacy.encryptedMnemonic, legacy.salt, legacy.iv, password);
+      sessionPassword = password;
+      touchSession();
+      // Migrate legacy vault to new encrypted format
+      (legacy as any).__mnemonic = sessionMnemonic;
+      await saveVault(legacy);
+      logEvent('security', 'Vault migrated to full-encryption format', 'success');
+      return true;
+    } catch { return false; }
+  }
+
+  return false;
 };
 
-export const isVaultLocked = () => !sessionMnemonic;
+export const isVaultLocked = () => {
+  if (isSessionExpired()) return true;
+  return !sessionMnemonic;
+};
+
 export const isVaultSetup = async () => {
-  const vault = await getVault();
-  return vault.isEncrypted;
+  const envelope = getVaultEnvelope();
+  if (envelope) return envelope.isSetup;
+  const legacy = getLegacyVault();
+  if (legacy) return legacy.isEncrypted;
+  return false;
 };
 
 const saveVault = async (data: VaultData) => {
-  if (typeof window !== 'undefined' && (window as any).chrome?.storage?.local) {
-    await (window as any).chrome.storage.local.set({ [VAULT_KEY]: data });
+  if (typeof window === 'undefined') return;
+  if (!sessionPassword) {
+    // Fallback: save as legacy format if no session password
+    localStorage.setItem(VAULT_KEY, JSON.stringify(data));
     return;
   }
-  localStorage.setItem(VAULT_KEY, JSON.stringify(data));
+  // SEC-18: Encrypt the entire vault structure
+  const vaultJson = JSON.stringify(data);
+  const encrypted = await encryptData(vaultJson, sessionPassword);
+  const envelope: EncryptedVaultEnvelope = {
+    encrypted: encrypted.encrypted,
+    salt: encrypted.salt,
+    iv: encrypted.iv,
+    isSetup: true,
+  };
+  localStorage.setItem(VAULT_KEY, JSON.stringify(envelope));
 };
 
 
@@ -571,32 +705,24 @@ export const deriveAddress = (mnemonic: string, index: number): string => {
     return "0x0000000000000000000000000000000000000000";
   }
 
-  // Handle special cases first
-  if (activeChainId === 'bitcoin') {
-    // Simulate Bech32 (SegWit) address for soft launch
-    const idHash = ethers.id(`${mnemonic}-${index}-btc`);
-    const hash = (idHash || '0x00000000').substring(2, 42);
-    return `bc1q${hash}`;
-  }
-
-  if (activeChainId === 'sui') {
-    // Sui addresses start with 0x but are 64 hex chars
-    return ethers.id(`${mnemonic}-${index}-sui`);
-  }
-
-  // Use DERIVATION_PATHS for other chains
-  const basePath = DERIVATION_PATHS[activeChainId] || "m/44'/60'/0'/0/";
-  // Ensure the path ends with a slash before appending index
-  const fullPath = basePath.endsWith('/') ? `${basePath}${index}` : `${basePath}/${index}`;
-
   try {
-    // BIP39 Hardening: ensure LangEn is used if wordlists.en is missing
-    const wordlist = (wordlists as any).en || LangEn.wordlist();
-    const wallet = ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, fullPath, wordlist);
-    return wallet.address;
+    if (activeChainId === 'bitcoin') {
+      const provider = new BitcoinProvider();
+      return provider.deriveAddress(mnemonic, index);
+    }
+
+    if (activeChainId === 'sui') {
+      const provider = new SuiProvider();
+      return provider.deriveAddress(mnemonic, index);
+    }
+
+    // Default EVM derivation
+    const basePath = DERIVATION_PATHS[activeChainId] || "m/44'/60'/0'/0/";
+    const provider = new EVMProvider(basePath);
+    return provider.deriveAddress(mnemonic, index);
   } catch (e) {
     console.error("Address Derivation Error:", e);
-    return "0x0000...0000";
+    return "0x0000000000000000000000000000000000000000";
   }
 };
 
@@ -688,99 +814,115 @@ export const exportWallet = async (idOrName: string): Promise<string> => {
 };
 
 export const signMessage = async (walletId: string, chain: string, message: string): Promise<any> => {
+  if (isSessionExpired() || !sessionMnemonic) throw new Error("Vault is locked");
+  touchSession();
   const vault = await getVault();
   const w = vault.wallets.find((x: any) => x.id === walletId || x.name === walletId);
   if (!w) throw new Error("Wallet not found");
 
-  return { signature: "0x_mock_signed_message_hash" };
-};
-
-export const getGasPriceEstimates = async (rpcUrl: string) => {
-  try {
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
-    const feeData = await provider.getFeeData();
-    const baseFee = feeData.gasPrice || ethers.parseUnits('1', 'gwei');
-
-    return {
-      baseFee: ethers.formatUnits(baseFee, 'gwei'),
-      slow: {
-        priorityFee: ethers.formatUnits(ethers.parseUnits('1', 'gwei'), 'gwei'),
-        maxFee: ethers.formatUnits(baseFee + ethers.parseUnits('2', 'gwei'), 'gwei'),
-        speed: 'slow'
-      },
-      average: {
-        priorityFee: ethers.formatUnits(ethers.parseUnits('2', 'gwei'), 'gwei'),
-        maxFee: ethers.formatUnits(baseFee * BigInt(2), 'gwei'),
-        speed: 'average'
-      },
-      fast: {
-        priorityFee: ethers.formatUnits(ethers.parseUnits('5', 'gwei'), 'gwei'),
-        maxFee: ethers.formatUnits(baseFee * BigInt(3), 'gwei'),
-        speed: 'fast'
-      }
-    };
-  } catch (err) {
-    console.error("Gas Estimate Error:", err);
-    return {
-      baseFee: '20',
-      slow: { priorityFee: '1', maxFee: '22', speed: 'slow' },
-      average: { priorityFee: '2', maxFee: '40', speed: 'average' },
-      fast: { priorityFee: '5', maxFee: '60', speed: 'fast' }
-    };
-  }
+  const basePath = DERIVATION_PATHS[activeChainId] || "m/44'/60'/0'/0/";
+  const fullPath = basePath.endsWith('/') ? `${basePath}${w.index}` : `${basePath}/${w.index}`;
+  const wordlist = (wordlists as any).en || LangEn.wordlist();
+  const hdWallet = ethers.HDNodeWallet.fromPhrase(sessionMnemonic, undefined, fullPath, wordlist);
+  const wallet = new ethers.Wallet(hdWallet.privateKey);
+  const signature = await wallet.signMessage(message);
+  return { signature };
 };
 
 export const signTransaction = async (walletId: string, chain: string, txHex: string): Promise<any> => {
+  // SEC-01 + SEC-03: Check session expiry before signing
+  if (isSessionExpired() || !sessionMnemonic) throw new Error("Vault is locked");
+  touchSession();
   logEvent('security', `Signing transaction for ${chain}...`, 'info');
+
   const vault = await getVault();
   const w = vault.wallets.find((x: any) => x.id === walletId || x.name === walletId);
   if (!w) throw new Error("Wallet not found");
 
-  // BOLT-05: Payload Validation
   try {
-    const tx = JSON.parse(txHex);
-    validateTransactionPayload(tx);
-
-    // Log gas parameters for audit trail
-    if (tx.maxFeePerGas || tx.maxPriorityFeePerGas) {
-      console.info("Boltwallet Security: EIP-1559 Gas parameters validated.", {
-        maxFee: tx.maxFeePerGas,
-        priorityFee: tx.maxPriorityFeePerGas,
-        gasLimit: tx.gasLimit
-      });
+    const txParams = JSON.parse(txHex);
+    // Skip EVM-specific validation for non-EVM chains
+    if (chain !== 'sui') {
+      validateTransactionPayload(txParams);
     }
 
-    console.info("Boltwallet Security: WYSIWYS payload validated and bound to signature.", { to: tx.to, value: tx.value });
+    const basePath = DERIVATION_PATHS[chain] || "m/44'/60'/0'/0/";
+    const fullPath = basePath.endsWith('/') ? `${basePath}${w.index}` : `${basePath}/${w.index}`;
+    const wordlist = (wordlists as any).en || LangEn.wordlist();
+    const chainConfig = CHAINS[chain as keyof typeof CHAINS];
+
+    // 1. EVM Signing (REAL — ethers v6 HDNodeWallet)
+    const hdWallet = ethers.HDNodeWallet.fromPhrase(sessionMnemonic, undefined, fullPath, wordlist);
+    const wallet = new ethers.Wallet(hdWallet.privateKey);
+
+    // SEC-04: Fetch live nonce and estimate gas
+    const rpcUrl = chainConfig?.rpc || '';
+    let liveNonce = txParams.nonce;
+    let liveGasLimit = txParams.gasLimit;
+    let liveGasPrice = txParams.gasPrice || txParams.maxFeePerGas;
+
+    if (rpcUrl) {
+      try {
+        const provider = new ethers.JsonRpcProvider(rpcUrl);
+        if (liveNonce === undefined || liveNonce === 0) {
+          liveNonce = await provider.getTransactionCount(hdWallet.address, 'pending');
+        }
+        if (!liveGasLimit || liveGasLimit === '21000' || liveGasLimit === 21000) {
+          try {
+            const estimated = await provider.estimateGas({
+              to: txParams.to,
+              value: txParams.value ? ethers.parseEther(txParams.value.toString()) : 0,
+              data: txParams.data || '0x',
+              from: hdWallet.address,
+            });
+            // Add 20% buffer for safety
+            liveGasLimit = (estimated * 120n / 100n).toString();
+          } catch {
+            liveGasLimit = txParams.data && txParams.data !== '0x' ? 200000 : 21000;
+          }
+        }
+        if (!liveGasPrice) {
+          const feeData = await provider.getFeeData();
+          liveGasPrice = feeData.gasPrice || ethers.parseUnits('1', 'gwei');
+        }
+      } catch (e: any) {
+        logEvent('rpc', `Live gas/nonce fetch warning: ${e.message}`, 'warning');
+      }
+    }
+
+    const signature = await wallet.signTransaction({
+      to: txParams.to,
+      value: txParams.value ? ethers.parseEther(txParams.value.toString()) : 0,
+      data: txParams.data || '0x',
+      nonce: liveNonce ?? 0,
+      gasLimit: liveGasLimit || 21000,
+      gasPrice: typeof liveGasPrice === 'string' ? liveGasPrice : (liveGasPrice || ethers.parseUnits('1', 'gwei')),
+      chainId: Number(chainConfig?.chainId || 1)
+    });
+
+    const from = hdWallet.address;
+    const newHistory: HistoryData = {
+      hash: ethers.keccak256(signature),
+      type: txParams.data && txParams.to === '0x' ? 'contract_call' : 'send',
+      from,
+      to: txParams.to,
+      value: txParams.value || '0',
+      asset: chainConfig?.nativeCurrency?.symbol || 'ETH',
+      usdValue: '0.00',
+      timestamp: new Date().toISOString(),
+      chainId: chain,
+      status: 'success'
+    };
+
+    vault.history = [newHistory, ...(vault.history || [])];
+    await saveVault(vault);
+
+    logEvent('security', `Transaction signed successfully`, 'success');
+    return { signature };
   } catch (e: any) {
-    console.error("Security Alert: Invalid Transaction Payload Detected", e);
-    throw new Error(`Security Violation: ${e.message}`);
+    logEvent('security', `Signing Violation: ${e.message}`, 'error');
+    throw new Error(`Signing Violation: ${e.message}`);
   }
-
-  const randSuffix = Math.random().toString(16);
-  const sig = `0x_mock_signed_tx_${walletId}_${(randSuffix + '00000000').substring(2, 10)}`;
-
-  // Save to history
-  const parsedTx = JSON.parse(txHex);
-  const from = deriveAddress(sessionMnemonic || '', w.index);
-  const newHistory: HistoryData = {
-    hash: sig,
-    type: parsedTx.data && parsedTx.to === '0x' ? 'contract_call' : 'send',
-    from,
-    to: parsedTx.to,
-    value: parsedTx.value || '0',
-    asset: chain === 'ethereum' ? 'ETH' : chain.toUpperCase(),
-    usdValue: '0.00', // To be filled by UI if price available
-    timestamp: new Date().toISOString(),
-    chainId: chain,
-    status: 'success'
-  };
-
-  vault.history = [newHistory, ...(vault.history || [])];
-  await saveVault(vault);
-
-  const safeSig = sig || '0x...';
-  logEvent('security', `Transaction signed successfully: ${safeSig.substring(0, 10)}...`, 'success');
-  return { signature: sig };
 };
 
 export const getHistory = async (address: string, chainId: string): Promise<HistoryData[]> => {
@@ -816,30 +958,62 @@ export const generateMnemonic = async (): Promise<string> => {
 
 export const setSessionMnemonic = (mnemonic: string | null) => {
   sessionMnemonic = mnemonic;
+  if (mnemonic) touchSession();
 };
 
-export const getSessionMnemonic = () => sessionMnemonic;
+// SEC-03: Check session expiry before exposing mnemonic
+export const getSessionMnemonic = () => {
+  if (isSessionExpired()) return null;
+  touchSession();
+  return sessionMnemonic;
+};
 
 
 export const resetVault = async (mnemonic: string, newPassword: string): Promise<void> => {
   logEvent('security', 'Vault reset initiated with new password', 'warning');
-  // Validate mnemonic
   try {
-    ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, undefined, wordlists.en);
+    const wordlist = (wordlists as any).en || LangEn.wordlist();
+    ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, undefined, wordlist);
   } catch (e) {
     throw new Error("Invalid mnemonic phrase. Please check the 12 words.");
   }
 
-  const encrypted = await encryptData(mnemonic, newPassword);
-  const vault = await getVault();
-
-  vault.encryptedMnemonic = encrypted.encrypted;
-  vault.salt = encrypted.salt;
-  vault.iv = encrypted.iv;
-  vault.isEncrypted = true;
-
-  await saveVault(vault);
+  const vault: VaultData = {
+    encryptedMnemonic: '',
+    salt: '',
+    iv: '',
+    isEncrypted: true,
+    wallets: [],
+    contracts: [],
+    nfts: [],
+    history: []
+  };
+  (vault as any).__mnemonic = mnemonic;
   sessionMnemonic = mnemonic;
+  sessionPassword = newPassword;
+  touchSession();
+  await saveVault(vault);
+};
+
+export const getGasPriceEstimates = async (rpcUrl: string) => {
+  try {
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const feeData = await provider.getFeeData();
+    const baseFee = feeData.gasPrice || ethers.parseUnits('1', 'gwei');
+    return {
+      baseFee: ethers.formatUnits(baseFee, 'gwei'),
+      slow: { priorityFee: '1', maxFee: ethers.formatUnits(baseFee + ethers.parseUnits('1', 'gwei'), 'gwei'), speed: 'slow' },
+      average: { priorityFee: '2', maxFee: ethers.formatUnits(baseFee + ethers.parseUnits('2', 'gwei'), 'gwei'), speed: 'average' },
+      fast: { priorityFee: '5', maxFee: ethers.formatUnits(baseFee + ethers.parseUnits('5', 'gwei'), 'gwei'), speed: 'fast' }
+    };
+  } catch {
+    return {
+      baseFee: '20',
+      slow: { priorityFee: '1', maxFee: '21', speed: 'slow' },
+      average: { priorityFee: '2', maxFee: '25', speed: 'average' },
+      fast: { priorityFee: '5', maxFee: '35', speed: 'fast' }
+    };
+  }
 };
 
 // Simplified stubs for remaining items
@@ -855,10 +1029,41 @@ export const revokeApiKey = () => { };
 export const signAndSend = (walletId: string) => ({ txHash: `0x_mock_hash_${walletId}` });
 
 export const importContract = async (name: string, address: string, abi: string, decimals: number, chainId: string) => {
+  // SEC-09: Checksum-validate EVM addresses
+  let checksumAddr = address;
+  try {
+    if (address.startsWith('0x') && address.length === 42) {
+      checksumAddr = ethers.getAddress(address);
+    }
+  } catch (e: any) {
+    throw new Error(`Invalid contract address: ${e.message}`);
+  }
+
+  // SEC-14: Validate ABI is a parseable JSON array
+  try {
+    const parsed = JSON.parse(abi);
+    if (!Array.isArray(parsed)) throw new Error('ABI must be a JSON array');
+  } catch (e: any) {
+    throw new Error(`Invalid ABI format: ${e.message}`);
+  }
+
   const vault = await getVault();
   if (!vault.contracts) vault.contracts = [];
 
-  const newContract = { name, address, abi, decimals, chainId };
+  // SEC-11: Duplicate contract guard
+  const existing = vault.contracts.find(
+    (c: any) => c.address.toLowerCase() === checksumAddr.toLowerCase() && c.chainId === chainId
+  );
+  if (existing) {
+    logEvent('rpc', `Contract ${checksumAddr} already imported on ${chainId} — updating`, 'info');
+    existing.name = name;
+    existing.abi = abi;
+    existing.decimals = decimals;
+    await saveVault(vault);
+    return existing;
+  }
+
+  const newContract = { name, address: checksumAddr, abi, decimals, chainId };
   vault.contracts.push(newContract);
   await saveVault(vault);
   return newContract;
@@ -883,131 +1088,46 @@ export const getNativeBalance = async (address: string, rpcUrl: string): Promise
 
   const safeAddress = address || '0x...';
   logEvent('rpc', `Fetching balance for ${safeAddress.substring(0, 8)}...`, 'info', { rpcUrl });
+
   try {
     const lowerRpc = rpcUrl.toLowerCase();
-    const isBitcoinRpc = lowerRpc.includes('bitcoin') || lowerRpc.includes('btc') || lowerRpc.includes('blockstream') || lowerRpc.includes('esplora');
-    const isBttcRpc = lowerRpc.includes('bittorrent');
-
-    if (isBitcoinRpc && !isBttcRpc) {
-      const apiKey = (typeof (import.meta as any).env !== 'undefined') ? (import.meta as any).env.VITE_BOLT_API_KEY : "8355b82201a25997c6ad4660f55a632";
-
-      // Case A: Ankr Bitcoin RPC (Premium Query API)
-      // We force Ankr if an API key is available, even if a legacy Esplora URL was passed.
-      if (rpcUrl.includes('ankr.com') || (apiKey && (rpcUrl.includes('blockstream.info') || rpcUrl.includes('esplora')))) {
-        const base = "https://rpc.ankr.com/btc";
-        const finalUrl = apiKey ? `${base}/${apiKey}` : base;
-
-        try {
-          const response = await fetch(finalUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              jsonrpc: '2.0',
-              id: 1,
-              method: 'ankr_getAccountBalance',
-              params: {
-                walletAddress: address,
-                blockchain: ['btc']
-              }
-            })
-          });
-          if (response.ok) {
-            const data = await response.json();
-            const btcAsset = data.result?.assets?.find((a: any) => a.blockchain === 'btc');
-            if (btcAsset) {
-               logEvent('rpc', `Ankr Bitcoin Balance: ${btcAsset.balance} BTC`, 'success');
-               return btcAsset.balance;
-            }
-          }
-        } catch (e) {
-          logEvent('fallback', "Ankr Bitcoin fetch failed, trying legacy REST...", 'warning');
-          console.warn("Ankr Bitcoin fetch failed, falling back to legacy REST if available...");
-        }
-      }
-
-      // Case B: Esplora REST Fallback (Only if Ankr didn't override or succeed)
-      if (rpcUrl.includes('blockstream.info') || rpcUrl.includes('esplora')) {
-        const response = await fetch(`${rpcUrl}address/${address}`, {
-          headers: apiKey ? { 'x-api-key': apiKey } : {}
-        });
-        if (!response.ok) throw new Error(`Esplora API returned ${response.status}`);
-        const data = await response.json();
-        const sats = (data.chain_stats.funded_txo_sum - data.chain_stats.spent_txo_sum) || 0;
-        return (sats / 1e8).toFixed(8);
-      }
+    
+    if (lowerRpc.includes('bitcoin') || lowerRpc.includes('btc') || lowerRpc.includes('blockstream') || lowerRpc.includes('esplora')) {
+      const provider = new BitcoinProvider();
+      const balance = await provider.getBalance(address, rpcUrl);
+      logEvent('rpc', `Bitcoin Balance Success: ${balance} BTC`, 'success');
+      return balance;
     }
 
+    if (lowerRpc.includes('sui')) {
+      const provider = new SuiProvider();
+      const balance = await provider.getBalance(address, rpcUrl);
+      logEvent('rpc', `Sui Balance Success: ${balance} SUI`, 'success');
+      return balance;
+    }
+
+    // Default EVM
     const apiKey = (typeof (import.meta as any).env !== 'undefined') ? (import.meta as any).env.VITE_BOLT_API_KEY : "";
     let finalRpcUrl = rpcUrl;
     
-    // BOLT-10: Strict Chain & Address Validation
-    const isEvmAddress = (address || '').toLowerCase().startsWith('0x');
-    const isEvmRpc = !lowerRpc.includes('bitcoin') && !lowerRpc.includes('btc') && !lowerRpc.includes('blockstream') && !lowerRpc.includes('esplora') && !lowerRpc.includes('sui') && !lowerRpc.includes('quai');
-
-    if (!isEvmAddress || !isEvmRpc) {
-       return "0.00";
-    }
-
     if (apiKey) {
       if (lowerRpc.includes('rpc.ankr.com')) {
         const base = rpcUrl.endsWith('/') ? rpcUrl.slice(0, -1) : rpcUrl;
         finalRpcUrl = `${base}/${apiKey}`;
-      } else if (rpcUrl.includes('llamarpc.com') || rpcUrl.includes('polygon-rpc.com') || rpcUrl.includes('monad.xyz') || rpcUrl.includes('sui.io')) {
-        if (rpcUrl.includes('eth')) finalRpcUrl = `https://rpc.ankr.com/eth/${apiKey}`;
-        else if (rpcUrl.includes('polygon')) finalRpcUrl = `https://rpc.ankr.com/polygon/${apiKey}`;
-        else if (rpcUrl.includes('bsc')) finalRpcUrl = `https://rpc.ankr.com/bsc/${apiKey}`;
-        else if (rpcUrl.includes('monad')) finalRpcUrl = `https://rpc.ankr.com/monad/${apiKey}`;
-        else if (rpcUrl.includes('sui')) finalRpcUrl = `https://rpc.ankr.com/sui/${apiKey}`;
       }
     }
 
-    const fetchReq = new ethers.FetchRequest(finalRpcUrl);
-    if (apiKey && !finalRpcUrl.includes('rpc.ankr.com')) {
-      fetchReq.setHeader("x-api-key", apiKey);
-    }
-
-    try {
-      const provider = new ethers.JsonRpcProvider(fetchReq, undefined, {
-        staticNetwork: true,
-        batchMaxCount: 1
-      });
-      const balance = await provider.getBalance(address);
-      return ethers.formatEther(balance);
-    } catch (e: any) {
-      const isForbidden = 
-        e.message?.includes('403') || 
-        e.message?.includes('Forbidden') || 
-        e.info?.responseStatus === 403 || 
-        e.info?.error?.message?.includes('403') ||
-        e.error?.message?.includes('403');
-
-      if (isForbidden && finalRpcUrl !== rpcUrl) {
-        logEvent('fallback', `Ankr 403 detected. Triggering Aggressive Fallback to ${rpcUrl}...`, 'warning');
-        try {
-          const fallbackProvider = new ethers.JsonRpcProvider(rpcUrl);
-          const fallbackBalance = await fallbackProvider.getBalance(address);
-          logEvent('rpc', `Fallback Success: ${ethers.formatEther(fallbackBalance)}`, 'success');
-          return ethers.formatEther(fallbackBalance);
-        } catch (fallbackErr) {
-          console.error("Boltwallet: Both Ankr and Fallback RPC failed.", fallbackErr);
-          return "0.00";
-        }
-      }
-      logEvent('rpc', `Balance Fetch Error: ${e.message || "Unknown"}`, 'error');
-      console.error(`Balance Fetch Error [${address}]:`, e.message || e);
-      return "0.00";
-    }
+    const provider = new EVMProvider();
+    const balance = await provider.getBalance(address, finalRpcUrl);
+    logEvent('rpc', `EVM Balance Success: ${balance}`, 'success');
+    return balance;
   } catch (err: any) {
     logEvent('rpc', `Fatal balance error: ${err.message}`, 'error');
-    const errorMsg = err.message || "Unknown RPC Error";
-    if (errorMsg.includes("could not coalesce") || errorMsg.includes("-32601") || errorMsg.includes("-32014")) {
-      return "0.00";
-    }
+    console.error(`Balance Fetch Error [${address}]:`, err.message || err);
     return "0.00";
   }
 };
 
-export const PBKDF2_ITERATIONS = 100000;
 export const getContractBalance = async (contractAddress: string, walletAddress: string, decimals: number, rpcUrl: string): Promise<string> => {
     if (!contractAddress || !walletAddress || !rpcUrl) return "0.00";
     

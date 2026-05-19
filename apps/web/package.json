@@ -11,13 +11,20 @@
   "dependencies": {
     "@boltwallet/core": "workspace:*",
     "@boltwallet/ui": "workspace:*",
+    "@mysten/sui": "^2.16.2",
+    "axios": "^1.16.0",
+    "bip32": "^5.0.1",
+    "bip39": "^3.1.0",
+    "bitcoinjs-lib": "^7.0.1",
+    "ecpair": "^3.0.1",
     "ethers": "^6.16.0",
     "framer-motion": "^10.0.0",
     "html5-qrcode": "^2.3.8",
     "lucide-react": "^0.263.1",
     "qrcode.react": "^4.2.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "tiny-secp256k1": "^2.2.4"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",
@@ -27,6 +34,8 @@
     "postcss": "^8.4.24",
     "tailwindcss": "^3.3.2",
     "vite": "^4.3.9",
-    "vite-plugin-node-polyfills": "^0.25.0"
+    "vite-plugin-node-polyfills": "^0.25.0",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "vite-plugin-wasm": "^3.6.0"
   }
 }
