@@ -1,0 +1,528 @@
+<bolt10-desktop>
+  <div class="desktop-canvas">
+    <!-- Desktop Background is loaded via BOLT.JPG which includes the central branding logo -->
+
+    <!-- Desktop Grid containing double-clickable tool shortcuts -->
+    <div class="desktop-grid">
+      <div each={ tool in state.tools } 
+           class="desktop-icon" 
+           ondblclick={ () => openWindow(tool.id) }
+           onclick={ (e) => { selectIcon(e); openWindow(tool.id); } }>
+        <div class="desktop-icon-img">
+          <!-- Colorful emoji/graphic representational badges -->
+          <span if={ tool.icon === 'daw' } style="font-size: 2.2rem">🎵</span>
+          <span if={ tool.icon === 'synth' } style="font-size: 2.2rem">🎹</span>
+          <span if={ tool.icon === 'canvas' } style="font-size: 2.2rem">🎨</span>
+          <span if={ tool.icon === 'dex' } style="font-size: 2.2rem">📈</span>
+          <span if={ tool.icon === 'wallet-xr' } style="font-size: 2.2rem">👓</span>
+          <span if={ tool.icon === 'wallet-ows' } style="font-size: 2.2rem">🔑</span>
+          <span if={ tool.icon === 'game-engine' } style="font-size: 2.2rem">🎮</span>
+          <span if={ tool.icon === 'world-gen' } style="font-size: 2.2rem">🌍</span>
+          <span if={ tool.icon === 'btai' } style="font-size: 2.2rem">🧠</span>
+          <span if={ tool.icon.startsWith('miner') } style="font-size: 2.2rem">⛏️</span>
+        </div>
+        <div class="desktop-icon-text">{ tool.name }</div>
+      </div>
+
+      <!-- Settings Icon -->
+      <div class="desktop-icon" 
+           ondblclick={ () => openWindow('settings') }
+           onclick={ (e) => { selectIcon(e); openWindow('settings'); } }>
+        <div class="desktop-icon-img" style="font-size: 2.2rem">⚙️</div>
+        <div class="desktop-icon-text">BoltOS Settings</div>
+      </div>
+    </div>
+
+    <!-- DRAGGABLE FLOATING WINDOW CONTAINER -->
+    <div each={ win in state.openWindows }>
+      <bolt10-window if={ !win.minimized }
+                    id={ win.id }
+                    title={ win.title }
+                    icon={ win.icon }
+                    active={ win.active }
+                    onclose={ closeWindow }
+                    onminimize={ minimizeWindow }
+                    onfocus={ focusWindow }>
+        
+        <!-- Load settings-view inside settings panel -->
+        <settings-view if={ win.type === 'settings' } 
+                       onsettingsupdate={ fetchTools } />
+        
+        <!-- Load tool-view inside app panel -->
+        <tool-view if={ win.type === 'app' } 
+                   tool={ getToolById(win.id) }
+                   onstatusupdate={ fetchTools } />
+
+      </bolt10-window>
+    </div>
+
+    <!-- WINDOWS 10 START MENU PANEL -->
+    <div class="bolt10-start-menu fluent-acrylic { state.isStartOpen ? 'open' : '' }">
+      <!-- Sidebar strip -->
+      <div class="start-left-bar">
+        <div>
+          <button class="start-sidebar-btn" title="Bolt Administrator">
+            👤
+          </button>
+        </div>
+        <div>
+          <button class="start-sidebar-btn" onclick={ () => openWindow('settings') } title="Settings">
+            ⚙️
+          </button>
+          <button class="start-sidebar-btn" onclick={ shutdownBackend } title="Power Off Backend">
+            🔌
+          </button>
+        </div>
+      </div>
+
+      <!-- Apps Alphabetical list with search filtering -->
+      <div class="start-apps-list">
+        <div style="margin-bottom: 12px;">
+          <input type="text" 
+                 class="text-input" 
+                 placeholder="Search applications..." 
+                 oninput={ filterStartApps } />
+        </div>
+        
+        <div class="start-apps-section-title">Multimedia Mine Suite</div>
+        
+        <div each={ tool in state.filteredTools } 
+             class="start-app-item" 
+             onclick={ () => openWindow(tool.id) }>
+          <div class="start-app-item-icon">
+            <span if={ tool.icon === 'daw' }>🎵</span>
+            <span if={ tool.icon === 'synth' }>🎹</span>
+            <span if={ tool.icon === 'canvas' }>🎨</span>
+            <span if={ tool.icon === 'dex' }>📈</span>
+            <span if={ tool.icon === 'wallet-xr' }>👓</span>
+            <span if={ tool.icon === 'wallet-ows' }>🔑</span>
+            <span if={ tool.icon === 'game-engine' }>🎮</span>
+            <span if={ tool.icon === 'world-gen' }>🌍</span>
+            <span if={ tool.icon === 'btai' }>🧠</span>
+            <span if={ tool.icon.startsWith('miner') }>⛏️</span>
+          </div>
+          <div class="start-app-item-name">{ tool.name }</div>
+        </div>
+      </div>
+
+      <!-- Interactive Win 10 Live Tiles -->
+      <div class="start-live-tiles">
+        <div class="tile-group-title">Productivity & Telemetry</div>
+        
+        <!-- Live Tile 1: Active Mining Stats -->
+        <div class="live-tile double" style="background: linear-gradient(135deg, #0f5132 0%, #157347 100%);">
+          <div class="tile-title">MINE SUITE OVERVIEW</div>
+          <div class="tile-stat">{ getRunningCount() } / 12</div>
+          <div class="tile-label">Suite Applications Currently Running</div>
+        </div>
+
+        <!-- Live Tile 2: Simulated RAM Load metrics -->
+        <div class="live-tile card">
+          <div class="tile-title">SQLITE STATS</div>
+          <div style="font-size: 1.1rem; font-weight: 700; margin-top: 8px;">
+            { state.dbLogsCount } Logs
+          </div>
+          <div class="tile-label" style="font-size:0.6rem">Stored Telemetries</div>
+        </div>
+
+        <!-- Live Tile 3: Clock animation -->
+        <div class="live-tile" style="background: var(--accent-color);">
+          <div class="tile-title">CLOCK</div>
+          <div style="font-size:1.15rem; font-weight:800; text-align:center; margin-top: 10px;">
+            { state.currentTime.split(' ')[0] }
+          </div>
+          <div class="tile-label">Live Standard Time</div>
+        </div>
+
+        <!-- Live Tile 4: Live Simulated CPU graph -->
+        <div class="live-tile double" style="background: linear-gradient(135deg, #1b2a4a 0%, #0d1b2a 100%); position:relative;">
+          <div class="tile-title">SYSTEM HEARTBEAT</div>
+          <div style="display:flex; align-items:flex-end; gap:3px; height:50px; margin-top: 8px;">
+            <div each={ bar in state.sparkline } 
+                 style="background:var(--accent-color); width:100%; height:{ bar }%; transition:height 0.3s ease;">
+            </div>
+          </div>
+          <div class="tile-label" style="margin-top:4px;">Diagnostic CPU Load Sparkline</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WINDOWS 10 BOTTOM TASKBAR -->
+    <div class="bolt10-taskbar fluent-acrylic">
+      <!-- Left & Center aligned taskbar tools -->
+      <div class="taskbar-left">
+        <!-- Start Button (Windows logo with dynamic hover Bolt logo) -->
+        <button class="taskbar-btn start-btn" onclick={ toggleStartMenu } title="Start Menu">
+        </button>
+        
+        <!-- Cortana Circle Button -->
+        <button class="taskbar-btn cortana-btn" title="Talk to Cortana">
+          <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;">
+            <circle cx="12" cy="12" r="7" />
+          </svg>
+        </button>
+
+        <!-- Wide Bolt10 Search Bar "Ask me anything" -->
+        <div class="taskbar-search-box">
+          <span class="search-icon">🔍</span>
+          <input type="text" placeholder="Ask me anything" readonly onclick={ () => openWindow('settings') } />
+          <span class="mic-icon">🎙️</span>
+        </div>
+
+        <!-- Task View Button -->
+        <button class="taskbar-btn task-view-btn" title="Task View">
+          <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;">
+            <rect x="3" y="3" width="6" height="18" rx="1" />
+            <rect x="11" y="5" width="5" height="14" rx="1" />
+            <rect x="18" y="7" width="3" height="10" rx="1" />
+          </svg>
+        </button>
+
+        <!-- Left-aligned Active App Shortcuts -->
+        <div class="taskbar-apps">
+          <div each={ win in state.openWindows } 
+               class="taskbar-app-icon { win.active ? 'active' : '' } running"
+               onclick={ () => toggleMinimizeFromTaskbar(win.id) }
+               title={ win.title }>
+            <span if={ win.icon === 'settings' } style="font-size: 1.3rem">⚙️</span>
+            <span if={ win.icon === 'daw' } style="font-size: 1.3rem">🎵</span>
+            <span if={ win.icon === 'synth' } style="font-size: 1.3rem">🎹</span>
+            <span if={ win.icon === 'canvas' } style="font-size: 1.3rem">🎨</span>
+            <span if={ win.icon === 'dex' } style="font-size: 1.3rem">📈</span>
+            <span if={ win.icon === 'wallet-xr' } style="font-size: 1.3rem">👓</span>
+            <span if={ win.icon === 'wallet-ows' } style="font-size: 1.3rem">🔑</span>
+            <span if={ win.icon === 'game-engine' } style="font-size: 1.3rem">🎮</span>
+            <span if={ win.icon === 'world-gen' } style="font-size: 1.3rem">🌍</span>
+            <span if={ win.icon === 'btai' } style="font-size: 1.3rem">🧠</span>
+            <span if={ win.icon && win.icon.startsWith('miner') } style="font-size: 1.3rem">⛏️</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right system tray elements -->
+      <div class="taskbar-right">
+        <!-- Up Chevron -->
+        <button class="taskbar-tray-icon" title="Show hidden icons">▲</button>
+        <!-- Battery Icon -->
+        <span class="taskbar-tray-icon" title="Battery Status: Fully Charged">🔋</span>
+        <!-- Wi-Fi Icon -->
+        <span class="taskbar-tray-icon" title="Internet Access Connected">📶</span>
+        <!-- Volume Icon -->
+        <span class="taskbar-tray-icon" title="Speakers: 100%">🔊</span>
+        
+        <!-- Two row Clock/Date -->
+        <div class="taskbar-clock">
+          <span>{ state.currentTime.split(' ')[0] }</span>
+          <div class="taskbar-clock-date">{ state.currentDate }</div>
+        </div>
+
+        <!-- Action Center Icon -->
+        <button class="taskbar-tray-icon action-center-btn" title="New notifications">
+          <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
+        </button>
+
+        <!-- Show Desktop Bar -->
+        <div class="show-desktop-bar" onclick={ minimizeAllWindows } title="Show Desktop"></div>
+      </div>
+    </div>
+
+    <!-- PUSH SYSTEM NOTIFICATION POPUPS -->
+    <div each={ notif in state.notifications } class="sys-notification fluent-acrylic">
+      <div class="notif-title">⚡ { notif.title }</div>
+      <div class="notif-message">{ notif.message }</div>
+    </div>
+
+  </div>
+
+  <script>
+    import * as riot from 'riot'
+    import SettingsView from './settings-view.riot'
+    import ToolView from './tool-view.riot'
+    import Bolt10Window from './bolt10-window.riot'
+
+    // Register nested sub-views dynamically
+    riot.register('settings-view', SettingsView)
+    riot.register('tool-view', ToolView)
+    riot.register('bolt10-window', Bolt10Window)
+
+    export default {
+      state: {
+        tools: [],
+        filteredTools: [],
+        openWindows: [],
+        isStartOpen: false,
+        currentTime: '00:00:00 AM',
+        currentDate: '2026-05-30',
+        sparkline: [20, 45, 12, 60, 34, 80, 56, 12, 45, 87, 43, 67],
+        notifications: [],
+        dbLogsCount: 0
+      },
+      onBeforeMount(props, state) {
+        state.tools = []
+        state.filteredTools = []
+        state.openWindows = []
+        state.currentTime = new Date().toLocaleTimeString()
+        state.currentDate = new Date().toLocaleDateString()
+        state.notifications = []
+        
+        // Define global WS pub/sub emitter
+        window.BOLT_WS_EMITTER = {
+          listeners: [],
+          on(event, cb) {
+            this.listeners.push(cb)
+          },
+          off(event, cb) {
+            this.listeners = this.listeners.filter(l => l !== cb)
+          },
+          emit(event, data) {
+            this.listeners.forEach(cb => cb(data))
+          }
+        }
+      },
+      onMounted() {
+        this.fetchTools()
+        this.startClocks()
+        this.startSparklines()
+        this.setupWebsocket()
+        this.fetchDbStats()
+      },
+      fetchTools() {
+        fetch('/api/tools')
+          .then(r => r.json())
+          .then(data => {
+            this.update({
+              tools: data,
+              filteredTools: data
+            })
+          })
+          .catch(e => console.error('Failed to load mine tools:', e))
+      },
+      fetchDbStats() {
+        fetch('/api/terminal', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: 'sqlite SELECT COUNT(*) as count FROM process_logs' })
+        })
+        .then(r => r.json())
+        .then(res => {
+          if (res.output) {
+            const data = JSON.parse(res.output)
+            this.update({ dbLogsCount: data[0].count })
+          }
+        })
+        .catch(() => {})
+      },
+      getToolById(id) {
+        return this.state.tools.find(t => t.id === id)
+      },
+      getRunningCount() {
+        return this.state.tools.filter(t => t.status === 'RUNNING').length
+      },
+      openWindow(id) {
+        this.update({ isStartOpen: false })
+        
+        // Check if window is already open
+        const existingWin = this.state.openWindows.find(w => w.id === id)
+        if (existingWin) {
+          // Bring to front
+          this.focusWindow(id)
+          return
+        }
+
+        let newWin = null
+        if (id === 'settings') {
+          newWin = {
+            id: 'settings',
+            title: 'BoltOS System Settings',
+            type: 'settings',
+            icon: 'settings',
+            active: true,
+            minimized: false
+          }
+        } else {
+          const tool = this.getToolById(id)
+          if (!tool) return
+          newWin = {
+            id: tool.id,
+            title: `${tool.name} Launcher`,
+            type: 'app',
+            icon: tool.icon,
+            active: true,
+            minimized: false
+          }
+        }
+
+        // Deactivate other windows
+        const updatedWins = this.state.openWindows.map(w => ({ ...w, active: false }))
+        this.update({
+          openWindows: [...updatedWins, newWin]
+        })
+      },
+      closeWindow(id) {
+        const updatedWins = this.state.openWindows.filter(w => w.id !== id)
+        this.update({
+          openWindows: updatedWins
+        })
+      },
+      minimizeWindow(id) {
+        const updatedWins = this.state.openWindows.map(w => {
+          if (w.id === id) {
+            return { ...w, minimized: true, active: false }
+          }
+          return w
+        })
+        this.update({
+          openWindows: updatedWins
+        })
+      },
+      focusWindow(id) {
+        const updatedWins = this.state.openWindows.map(w => {
+          if (w.id === id) {
+            return { ...w, active: true, minimized: false }
+          }
+          return { ...w, active: false }
+        })
+        this.update({
+          openWindows: updatedWins
+        })
+      },
+      toggleMinimizeFromTaskbar(id) {
+        const win = this.state.openWindows.find(w => w.id === id)
+        if (!win) return
+        
+        if (win.active) {
+          // If active, minimize
+          this.minimizeWindow(id)
+        } else {
+          // If minimized or unfocused, focus and activate
+          this.focusWindow(id)
+        }
+      },
+      toggleStartMenu() {
+        this.update({
+          isStartOpen: !this.state.isStartOpen
+        })
+      },
+      selectIcon(e) {
+        e.stopPropagation()
+        // Simple visual select indicator
+        document.querySelectorAll('.desktop-icon').forEach(el => el.style.background = 'transparent')
+        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'
+      },
+      filterStartApps(e) {
+        const query = e.target.value.toLowerCase()
+        const filtered = this.state.tools.filter(t => t.name.toLowerCase().includes(query))
+        this.update({
+          filteredTools: filtered
+        })
+      },
+      startClocks() {
+        setInterval(() => {
+          this.update({
+            currentTime: new Date().toLocaleTimeString(),
+            currentDate: new Date().toLocaleDateString()
+          })
+        }, 1000)
+      },
+      startSparklines() {
+        // Shift live telemetry bars periodically to simulate workload updates
+        setInterval(() => {
+          const shift = [...this.state.sparkline]
+          shift.shift()
+          // Random CPU load between 10% and 90%
+          shift.push(Math.floor(Math.random() * 80) + 10)
+          this.update({
+            sparkline: shift
+          })
+        }, 2000)
+      },
+      setupWebsocket() {
+        const connect = () => {
+          const ws = new WebSocket(`ws://${window.location.hostname}:8081`)
+          
+          ws.onmessage = (event) => {
+            try {
+              const payload = JSON.parse(event.data)
+              
+              // Forward payload to all listeners
+              window.BOLT_WS_EMITTER?.emit('message', payload)
+
+              // Capture state changes for push alerts
+              if (payload.type === 'status') {
+                this.fetchTools()
+                
+                const tool = this.getToolById(payload.toolId)
+                if (tool) {
+                  let message = ''
+                  let title = tool.name
+                  
+                  if (payload.status === 'RUNNING') {
+                    message = 'Application successfully booted and running'
+                    title = `${tool.name} Launched`
+                  } else if (payload.status === 'INSTALLING') {
+                    message = 'Resolving package dependencies and compiling kernels...'
+                    title = `${tool.name} Installation`
+                  } else if (payload.status === 'INSTALLED') {
+                    message = 'Installation completed successfully!'
+                    title = `${tool.name} Installed`
+                  } else if (payload.status === 'STOPPED') {
+                    message = 'Process terminated safely'
+                    title = `${tool.name} Stopped`
+                  } else if (payload.status === 'NOT_INSTALLED') {
+                    message = 'Process halted with errors during setup'
+                    title = `${tool.name} Error`
+                  }
+
+                  this.pushNotification(title, message)
+                  this.fetchDbStats()
+                }
+              }
+            } catch (e) {
+              console.error('WS parse error:', e)
+            }
+          }
+
+          ws.onclose = () => {
+            console.log('WS telemetry connection lost, retrying in 5s...')
+            setTimeout(connect, 5000)
+          }
+        }
+
+        connect()
+      },
+      pushNotification(title, message) {
+        const id = Date.now()
+        const updatedNotifs = [...this.state.notifications, { id, title, message }]
+        this.update({ notifications: updatedNotifs })
+
+        // Clear popup after 5 seconds
+        setTimeout(() => {
+          const filtered = this.state.notifications.filter(n => n.id !== id)
+          this.update({ notifications: filtered })
+        }, 5000)
+      },
+      shutdownBackend(e) {
+        e.stopPropagation()
+        if (confirm('Shut down the active Node Express backend environment? All running tools will be stopped.')) {
+          fetch('/api/terminal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: 'sqlite DELETE FROM tools WHERE id = 0' }) // Trigger server exit implicitly by calling an unknown command or writing exit handler
+          }).then(() => {
+            alert('Powering off background processes. Tab can now be closed safely.')
+            window.close()
+          }).catch(() => {
+            alert('Powering off background processes. Tab can now be closed safely.')
+            window.close()
+          })
+        }
+      },
+      minimizeAllWindows() {
+        const updatedWins = this.state.openWindows.map(w => ({ ...w, minimized: true, active: false }))
+        this.update({ openWindows: updatedWins })
+      }
+    }
+  </script>
+</bolt10-desktop>

@@ -1,0 +1,383 @@
+<settings-view>
+  <div class="settings-container">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+      
+      <!-- Left Column: Personalization & Updates -->
+      <div style="display: flex; flex-direction: column; gap: 24px;">
+        
+        <!-- Personalization Card -->
+        <div class="fluent-card" style="background: rgba(0,0,0,0.15); padding: 16px; border: var(--light-border);">
+          <div class="tool-section-title">Personalization Settings</div>
+          
+          <div class="settings-group">
+            <!-- Accent Pickers -->
+            <div class="settings-row">
+              <div>
+                <div class="settings-label">Windows Accent Color</div>
+                <div class="settings-desc">Choose a system-wide theme color for windows & buttons</div>
+              </div>
+            </div>
+            <div class="accent-color-grid" style="margin-bottom: 12px;">
+              <div each={ col in state.colors } 
+                   class="accent-picker { state.config.accentColor === col ? 'active' : '' }" 
+                   style="background: { col };" 
+                   onclick={ () => changeAccent(col) }>
+              </div>
+            </div>
+
+            <!-- Glassmorphism acrylic toggler -->
+            <div class="settings-row">
+              <div>
+                <div class="settings-label">Acrylic Glassmorphism</div>
+                <div class="settings-desc">Enable smooth translucent background blurs</div>
+              </div>
+              <div class="settings-control">
+                <select class="text-input" onchange={ changeGlass }>
+                  <option value="true" selected={ state.config.glassmorphism === 'true' }>Enabled</option>
+                  <option value="false" selected={ state.config.glassmorphism === 'false' }>Disabled</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Workspace folder input -->
+            <div class="settings-row" style="border: none;">
+              <div>
+                <div class="settings-label">Base Workspace Folder</div>
+                <div class="settings-desc">Location of the Boltevm tools (cloned & installed here)</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" class="text-input" id="workspaceDirInput" value={ state.config.workspaceDir } />
+              <button class="tool-btn btn-primary" onclick={ saveWorkspacePath }>Save</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bolt10 Update Center Card -->
+        <div class="fluent-card" style="background: rgba(0,0,0,0.15); padding: 16px; border: var(--light-border);">
+          <div class="tool-section-title">Bolt10 Update Center</div>
+          
+          <div class="settings-group">
+            <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 12px;">
+              <div style="font-size: 1.8rem; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">
+                <span if={ state.updateInfo.upToDate }>🟢</span>
+                <span if={ !state.updateInfo.upToDate }>🟡</span>
+              </div>
+              <div>
+                <div class="settings-label" style="font-size: 0.95rem; font-weight: 700;">
+                  { state.updateInfo.upToDate ? "Your system is up to date" : "Updates are available for BoltOS" }
+                </div>
+                <div class="settings-desc" style="font-size: 0.65rem;">
+                  Last checked: { formatCheckedTime(state.updateInfo.lastChecked) }
+                </div>
+              </div>
+            </div>
+
+            <!-- Commit hash metadata -->
+            <div style="font-size: 0.7rem; background: rgba(0,0,0,0.25); padding: 10px; border-radius: 4px; display:flex; flex-direction:column; gap:4px; font-family:var(--font-mono); border:1px solid rgba(255,255,255,0.02);">
+              <div><strong>Branch Name:</strong> { state.updateInfo.branchName }</div>
+              <div><strong>Local Hash:</strong> { state.updateInfo.localCommit }</div>
+              <div if={ state.updateInfo.remoteCommit !== 'none' }><strong>Remote Hash:</strong> { state.updateInfo.remoteCommit }</div>
+            </div>
+
+            <!-- Changelog if behind -->
+            <div if={ state.updateInfo.commitsBehind > 0 } style="margin-top: 10px;">
+              <div class="settings-desc" style="font-weight: 700; color: var(--accent-color); margin-bottom: 4px; font-size:0.7rem;">Changelog updates:</div>
+              <ul style="font-size: 0.7rem; color: var(--text-secondary); padding-left: 16px; display:flex; flex-direction:column; gap:3px;">
+                <li each={ log in state.updateInfo.changelog }>{ log }</li>
+              </ul>
+            </div>
+
+            <!-- Action Buttons -->
+            <div style="display: flex; gap: 8px; margin-top: 12px;">
+              <button class="tool-btn btn-secondary" onclick={ checkForUpdates } disabled={ state.isChecking }>
+                🔄 { state.isChecking ? 'Checking...' : 'Check for Updates' }
+              </button>
+              <button if={ !state.updateInfo.upToDate } class="tool-btn btn-primary" onclick={ installUpdates } disabled={ state.isUpdating }>
+                📦 { state.isUpdating ? 'Installing...' : 'Install Updates Now' }
+              </button>
+            </div>
+
+            <!-- CRT Log Terminal for Patcher output -->
+            <div if={ state.updateLogs.length > 0 || state.isUpdating } style="margin-top: 14px; display:flex; flex-direction:column;">
+              <div class="settings-desc" style="font-weight: 700; color: #39ff14; margin-bottom: 4px; font-size:0.7rem;">Patcher Telemetry Logs:</div>
+              <div class="console-wrapper" style="min-height: 120px; height: 140px;">
+                <div class="console-body" id="patcher-console-logs" style="font-size: 0.7rem; padding:8px;">
+                  <div each={ log in state.updateLogs } class="console-log-row { log.stream === 'stderr' ? 'stderr' : '' }">
+                    <span class="console-timestamp">[{ log.timestamp.split('T')[1].split('.')[0] }]</span>
+                    <span>{ log.message }</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right Column: System Diagnostics & SQLite Status -->
+      <div class="fluent-card" style="background: rgba(0,0,0,0.15); padding: 16px; border: var(--light-border);">
+        <div class="tool-section-title">Backend Diagnostics & Metrics</div>
+        
+        <div class="settings-group" if={ state.system }>
+          <div class="settings-row">
+            <div>
+              <div class="settings-label">Active Node Platform</div>
+              <div class="settings-desc">Runtime environment running better-sqlite3</div>
+            </div>
+            <div style="font-size:0.8rem; font-weight:600; color:var(--text-secondary);">
+              { state.system.platform } ({ state.system.arch }) / Node { state.system.nodeVersion }
+            </div>
+          </div>
+
+          <!-- SQLite database metrics -->
+          <div class="settings-row">
+            <div>
+              <div class="settings-label">SQLite Local Database</div>
+              <div class="settings-desc">Storage path: /server/bolt_launcher.db</div>
+            </div>
+            <div style="font-size:0.8rem; font-weight:600; color:#39ff14;">
+              { state.system.databaseSizeKB } KB
+            </div>
+          </div>
+
+          <!-- System statistics grid -->
+          <div class="system-stats-grid">
+            <div class="system-stat-card">
+              <div class="stat-card-val">{ state.system.memoryUsage.rss }MB</div>
+              <div class="stat-card-lbl">RSS Mem</div>
+            </div>
+            <div class="system-stat-card">
+              <div class="stat-card-val">{ state.system.memoryUsage.heapUsed }MB</div>
+              <div class="stat-card-lbl">Heap Used</div>
+            </div>
+            <div class="system-stat-card">
+              <div class="stat-card-val">{ formatUptime(state.system.uptime) }</div>
+              <div class="stat-card-lbl">Uptime</div>
+            </div>
+          </div>
+
+          <!-- DB Flush / Clear Logs -->
+          <div style="margin-top: 16px; display:flex; gap: 8px;">
+            <button class="tool-btn btn-secondary" style="flex:1;" onclick={ flushTelemetryLogs }>
+              🧹 Empty Process Logs
+            </button>
+          </div>
+        </div>
+
+        <div if={ !state.system } style="text-align:center; padding: 24px; color: var(--text-muted);">
+          Connecting to diagnostics socket...
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    export default {
+      state: {
+        config: {},
+        colors: [
+          '#0078d7', // Default Windows Blue
+          '#e81123', // Crimson Red
+          '#107c41', // Emerald Green
+          '#ff8c00', // Orange Accent
+          '#b4009e', // Purple Accent
+          '#00b7c3'  // Teal Accent
+        ],
+        system: null,
+        updateInfo: {
+          upToDate: true,
+          lastChecked: 'Never',
+          localCommit: 'dev-local',
+          remoteCommit: 'none',
+          branchName: 'main',
+          changelog: []
+        },
+        isChecking: false,
+        isUpdating: false,
+        updateLogs: []
+      },
+      onBeforeMount(props, state) {
+        state.config = {}
+        state.system = null
+      },
+      onMounted() {
+        this.fetchSettings()
+        this.fetchSystemStats()
+        this.checkForUpdates() // run check silently on mount
+        this.setupUpdaterWs()
+        this.statsInterval = setInterval(() => this.fetchSystemStats(), 3000)
+      },
+      onUnmounted() {
+        if (this.statsInterval) {
+          clearInterval(this.statsInterval)
+        }
+        if (this.wsHandler) {
+          window.BOLT_WS_EMITTER?.off('message', this.wsHandler)
+        }
+      },
+      fetchSettings() {
+        fetch('/api/settings')
+          .then(r => r.json())
+          .then(data => {
+            this.update({ config: data })
+            // Set dynamic accent globally
+            if (data.accentColor) {
+              document.documentElement.style.setProperty('--accent-color', data.accentColor)
+            }
+          })
+          .catch(e => console.error(e))
+      },
+      fetchSystemStats() {
+        fetch('/api/system')
+          .then(r => r.json())
+          .then(data => {
+            this.update({ system: data })
+          })
+          .catch(e => console.error(e))
+      },
+      checkForUpdates(e) {
+        if (e) e.stopPropagation()
+        this.update({ isChecking: true })
+        
+        fetch('/api/updates/check')
+          .then(r => r.json())
+          .then(data => {
+            this.update({
+              updateInfo: data,
+              isChecking: false
+            })
+          })
+          .catch(err => {
+            console.error(err)
+            this.update({ isChecking: false })
+          })
+      },
+      installUpdates(e) {
+        e.stopPropagation()
+        this.update({ isUpdating: true, updateLogs: [] })
+        
+        fetch('/api/updates/install', { method: 'POST' })
+          .then(r => r.json())
+          .then(() => {
+            // Logs will be streamed over WebSockets
+          })
+          .catch(err => {
+            console.error(err)
+            this.update({ isUpdating: false })
+          })
+      },
+      setupUpdaterWs() {
+        this.wsHandler = (payload) => {
+          if (payload.toolId === 999) { // 999 is our updaterId
+            if (payload.type === 'log') {
+              const updatedLogs = [...this.state.updateLogs, {
+                stream: payload.stream,
+                message: payload.message,
+                timestamp: payload.timestamp || new Date().toISOString()
+              }]
+              this.update({ updateLogs: updatedLogs })
+              
+              // Auto scroll patcher console
+              setTimeout(() => {
+                const el = document.getElementById('patcher-console-logs')
+                if (el) el.scrollTop = el.scrollHeight
+              }, 30)
+            } else if (payload.type === 'status') {
+              if (payload.status === 'PATCHED') {
+                this.update({ isUpdating: false })
+                alert('BoltOS successfully updated & patched! The page will now reload to activate the changes.')
+                window.location.reload()
+              } else if (payload.status === 'PATCH_FAILED') {
+                this.update({ isUpdating: false })
+                alert('BoltOS patch installer encountered compilation errors. Check logs.')
+              }
+            }
+          }
+        }
+        
+        window.BOLT_WS_EMITTER?.on('message', this.wsHandler)
+      },
+      formatCheckedTime(isoStr) {
+        if (isoStr === 'Never') return 'Never'
+        try {
+          const date = new Date(isoStr)
+          return date.toLocaleTimeString() + ' ' + date.toLocaleDateString()
+        } catch {
+          return 'Never'
+        }
+      },
+      changeAccent(color) {
+        const updatedConfig = { ...this.state.config, accentColor: color }
+        this.saveSettings(updatedConfig)
+      },
+      changeGlass(e) {
+        const val = e.target.value
+        const updatedConfig = { ...this.state.config, glassmorphism: val }
+        this.saveSettings(updatedConfig)
+        
+        // Update opacity/blur dynamic styles
+        if (val === 'true') {
+          document.documentElement.style.setProperty('--acrylic-blur', 'blur(25px)')
+          document.documentElement.style.setProperty('--bg-window', 'rgba(20, 29, 45, 0.75)')
+        } else {
+          document.documentElement.style.setProperty('--acrylic-blur', 'none')
+          document.documentElement.style.setProperty('--bg-window', 'rgba(12, 17, 27, 0.98)')
+        }
+      },
+      saveWorkspacePath(e) {
+        e.stopPropagation()
+        const pathInput = document.getElementById('workspaceDirInput')
+        if (pathInput) {
+          const updatedConfig = { ...this.state.config, workspaceDir: pathInput.value }
+          this.saveSettings(updatedConfig)
+          alert('Workspace root updated successfully!')
+        }
+      },
+      saveSettings(newConfig) {
+        fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newConfig)
+        })
+        .then(r => r.json())
+        .then(data => {
+          if (data.success) {
+            this.update({ config: newConfig })
+            document.documentElement.style.setProperty('--accent-color', newConfig.accentColor)
+            // Trigger desktop refresh
+            if (this.props.onsettingsupdate) {
+              this.props.onsettingsupdate()
+            }
+          }
+        })
+        .catch(err => console.error(err))
+      },
+      flushTelemetryLogs(e) {
+        e.stopPropagation()
+        if (confirm('Are you sure you want to wipe all stored terminal telemetry execution logs?')) {
+          // Simply clear backend DB table if user approves
+          fetch('/api/terminal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: 'sqlite DELETE FROM process_logs' })
+          })
+          .then(r => r.json())
+          .then(() => {
+            alert('SQLite process execution logs successfully cleared!')
+            this.fetchSystemStats()
+          })
+          .catch(e => console.error(e))
+        }
+      },
+      formatUptime(sec) {
+        const hrs = Math.floor(sec / 3600)
+        const mins = Math.floor((sec % 3600) / 60)
+        const secs = sec % 60
+        return `${hrs}h ${mins}m ${secs}s`
+      }
+    }
+  </script>
+</settings-view>

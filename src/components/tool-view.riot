@@ -1,0 +1,328 @@
+<tool-view>
+  <div class="tool-detail-container">
+    <!-- Sidebar specs and action panel -->
+    <div class="tool-sidebar">
+      <div>
+        <div class="tool-branding">
+          <div class="tool-avatar">
+            <!-- Icon rendering based on tech category -->
+            <span if={ props.tool.icon === 'daw' }>🎵</span>
+            <span if={ props.tool.icon === 'synth' }>🎹</span>
+            <span if={ props.tool.icon === 'canvas' }>🎨</span>
+            <span if={ props.tool.icon === 'dex' }>📈</span>
+            <span if={ props.tool.icon === 'wallet-xr' }>👓</span>
+            <span if={ props.tool.icon === 'wallet-ows' }>🔑</span>
+            <span if={ props.tool.icon === 'game-engine' }>🎮</span>
+            <span if={ props.tool.icon === 'world-gen' }>🌍</span>
+            <span if={ props.tool.icon === 'btai' }>🧠</span>
+            <span if={ props.tool.icon.startsWith('miner') }>⛏️</span>
+          </div>
+          <h2 class="tool-title">{ props.tool.name }</h2>
+          <div class="tool-status-badge status-{ props.tool.status.toLowerCase() }">
+            { props.tool.status.replace('_', ' ') }
+          </div>
+        </div>
+
+        <div class="tool-metadata-list">
+          <div class="metadata-item">
+            <div class="metadata-item-title">Default Port</div>
+            <div style="display: flex; gap: 6px; align-items: center; margin-top: 4px;">
+              <input type="number" 
+                     class="text-input" 
+                     style="width: 80px; padding: 4px 8px; font-size: 0.75rem;" 
+                     id="toolPortInput-{ props.tool.id }" 
+                     value={ props.tool.default_port }
+                     disabled={ props.tool.status === 'RUNNING' } />
+              <button if={ props.tool.status !== 'RUNNING' }
+                      class="tool-btn btn-primary" 
+                      style="padding: 4px 8px; font-size: 0.65rem;"
+                      onclick={ saveCustomPort }>
+                Save
+              </button>
+            </div>
+            <div if={ props.tool.status === 'RUNNING' } 
+                 style="font-size: 0.6rem; color: var(--text-muted); margin-top: 2px;">
+              Stop app to modify port
+            </div>
+          </div>
+          <div class="metadata-item">
+            <div class="metadata-item-title">Workspace Folder</div>
+            <div class="metadata-item-value">Documents/{ props.tool.folder_name }</div>
+          </div>
+          <div class="metadata-item" if={ state.latency }>
+            <div class="metadata-item-title">Ping Latency</div>
+            <div class="metadata-item-value" style="color: #39ff14">{ state.latency }ms (Online)</div>
+          </div>
+          <div class="metadata-item" if={ !state.latency && props.tool.status === 'RUNNING' }>
+            <div class="metadata-item-title">Status Telemetry</div>
+            <div class="metadata-item-value" style="color: #ff3333">Checking socket...</div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <!-- Action Buttons -->
+        <div class="tool-actions">
+          <!-- Install Button -->
+          <button if={ props.tool.status === 'NOT_INSTALLED' } 
+                  class="tool-btn btn-primary" 
+                  onclick={ installTool }>
+            📥 Download & Install
+          </button>
+          
+          <button if={ props.tool.status === 'INSTALLING' } 
+                  class="tool-btn btn-disabled" disabled>
+            ⚙️ Installing...
+          </button>
+
+          <!-- Launch Button -->
+          <button if={ props.tool.status === 'INSTALLED' || props.tool.status === 'STOPPED' } 
+                  class="tool-btn btn-primary" 
+                  onclick={ launchTool }>
+            🚀 Launch App
+          </button>
+
+          <!-- Running/Stop Button -->
+          <button if={ props.tool.status === 'RUNNING' } 
+                  class="tool-btn btn-danger" 
+                  onclick={ stopTool }>
+            🛑 Stop App
+          </button>
+          
+          <!-- Reinstall if already downloaded -->
+          <button if={ props.tool.status === 'INSTALLED' || props.tool.status === 'STOPPED' } 
+                  class="tool-btn btn-secondary" 
+                  style="margin-top: 4px;"
+                  onclick={ installTool }>
+            🔄 Reinstall / Update
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Tech Spec and Live Console Logs -->
+    <div class="tool-main">
+      <div>
+        <div class="tool-section-title">Application Description</div>
+        <p style="font-size: 0.85rem; line-height: 1.5; color: var(--text-secondary);">
+          { props.tool.description }
+        </p>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <div>
+          <div class="tool-section-title">Substrate Stack</div>
+          <div style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">
+            { props.tool.tech_stack }
+          </div>
+        </div>
+        <div>
+          <div class="tool-section-title">SLA Specifications</div>
+          <div style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">
+            { props.tool.sla_metrics }
+          </div>
+        </div>
+      </div>
+
+      <!-- Real-time Console Log Terminal -->
+      <div style="display: flex; flex-direction: column; flex: 1;">
+        <div class="tool-section-title">Live Process Telemetry Console</div>
+        <div class="console-wrapper">
+          <div class="console-header">
+            <span>Terminal: { props.tool.folder_name } &gt; { props.tool.launch_command }</span>
+            <span style="cursor: pointer;" onclick={ clearConsoleLogs }>Clear Log</span>
+          </div>
+          <div class="console-body" id="console-logs-{ props.tool.id }">
+            <div each={ log in state.logs } class="console-log-row { log.stream === 'stderr' ? 'stderr' : '' }">
+              <span class="console-timestamp">[{ formatTime(log.timestamp) }]</span>
+              <span>{ log.message }</span>
+            </div>
+            <!-- Blank indicator for scrolling anchor -->
+            <div id="console-scroll-anchor-{ props.tool.id }"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    export default {
+      state: {
+        logs: [],
+        latency: null
+      },
+      onBeforeMount(props, state) {
+        state.logs = []
+        state.latency = null
+      },
+      onMounted() {
+        this.fetchLogs()
+        this.setupWsListener()
+        this.startHealthChecks()
+      },
+      onUnmounted() {
+        if (this.wsHandler) {
+          window.BOLT_WS_EMITTER?.off('message', this.wsHandler)
+        }
+        if (this.healthInterval) {
+          clearInterval(this.healthInterval)
+        }
+      },
+      fetchLogs() {
+        fetch(`/api/tools/${this.props.tool.id}/logs`)
+          .then(r => r.json())
+          .then(data => {
+            this.update({
+              logs: data
+            })
+            this.scrollToBottom()
+          })
+          .catch(e => console.error('Failed to load logs:', e))
+      },
+      setupWsListener() {
+        this.wsHandler = (payload) => {
+          if (payload.toolId === this.props.tool.id) {
+            if (payload.type === 'log') {
+              const updatedLogs = [...this.state.logs, {
+                stream: payload.stream,
+                message: payload.message,
+                timestamp: payload.timestamp
+              }]
+              
+              // Cap memory logs at last 400 items
+              if (updatedLogs.length > 400) {
+                updatedLogs.shift()
+              }
+              
+              this.update({ logs: updatedLogs })
+              this.scrollToBottom()
+            }
+          }
+        }
+
+        // Subscribe to global ws events via custom listener
+        window.BOLT_WS_EMITTER?.on('message', this.wsHandler)
+      },
+      startHealthChecks() {
+        const pingPort = () => {
+          if (this.props.tool.status !== 'RUNNING') {
+            this.update({ latency: null })
+            return
+          }
+
+          const start = Date.now()
+          // Ping the configured default port of the running app
+          fetch(`http://localhost:${this.props.tool.default_port}`, { mode: 'no-cors', cache: 'no-cache' })
+            .then(() => {
+              const delay = Date.now() - start
+              this.update({ latency: delay })
+            })
+            .catch(() => {
+              // Node servers might not respond immediately, check if websocket telemetry can update it
+              this.update({ latency: null })
+            })
+        }
+
+        // Run every 4 seconds
+        pingPort()
+        this.healthInterval = setInterval(pingPort, 4000)
+      },
+      scrollToBottom() {
+        setTimeout(() => {
+          const body = document.getElementById(`console-logs-${this.props.tool.id}`)
+          if (body) {
+            body.scrollTop = body.scrollHeight
+          }
+        }, 30)
+      },
+      clearConsoleLogs(e) {
+        e.stopPropagation()
+        this.update({ logs: [] })
+      },
+      formatTime(tsStr) {
+        try {
+          const date = new Date(tsStr)
+          return date.toTimeString().split(' ')[0]
+        } catch {
+          return '00:00:00'
+        }
+      },
+      installTool(e) {
+        e.stopPropagation()
+        fetch(`/api/tools/${this.props.tool.id}/install`, { method: 'POST' })
+          .then(r => r.json())
+          .then(data => {
+            if (data.error) {
+              alert(data.error)
+            } else {
+              if (this.props.onstatusupdate) {
+                this.props.onstatusupdate()
+              }
+            }
+          })
+          .catch(err => console.error(err))
+      },
+      launchTool(e) {
+        e.stopPropagation()
+        fetch(`/api/tools/${this.props.tool.id}/launch`, { method: 'POST' })
+          .then(r => r.json())
+          .then(data => {
+            if (data.error) {
+              alert(data.error)
+            } else {
+              if (this.props.onstatusupdate) {
+                this.props.onstatusupdate()
+              }
+              // Wait and verify logs
+              setTimeout(() => this.fetchLogs(), 500)
+            }
+          })
+          .catch(err => console.error(err))
+      },
+      stopTool(e) {
+        e.stopPropagation()
+        fetch(`/api/tools/${this.props.tool.id}/stop`, { method: 'POST' })
+          .then(r => r.json())
+          .then(data => {
+            if (data.error) {
+              alert(data.error)
+            } else {
+              if (this.props.onstatusupdate) {
+                this.props.onstatusupdate()
+              }
+            }
+          })
+          .catch(err => console.error(err))
+      },
+      saveCustomPort(e) {
+        e.stopPropagation()
+        const input = document.getElementById(`toolPortInput-${this.props.tool.id}`)
+        if (input) {
+          const newPort = parseInt(input.value)
+          if (!newPort || isNaN(newPort)) {
+            alert('Please enter a valid port number.')
+            return
+          }
+          
+          fetch(`/api/tools/${this.props.tool.id}/port`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ port: newPort })
+          })
+          .then(r => r.json())
+          .then(data => {
+            if (data.success) {
+              alert(`Port successfully updated to ${newPort}!`)
+              if (this.props.onstatusupdate) {
+                this.props.onstatusupdate() // Triggers desktop refresh to update db state
+              }
+            } else {
+              alert(data.error || 'Failed to update port.')
+            }
+          })
+          .catch(err => console.error(err))
+        }
+      }
+    }
+  </script>
+</tool-view>

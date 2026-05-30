@@ -1,0 +1,206 @@
+<bolt10-window>
+  <div class="bolt10-window fluent-acrylic { state.isActive ? 'active' : '' } { state.isMaximized ? 'maximized' : '' }"
+       style="top: { state.y }px; left: { state.x }px; width: { state.isMaximized ? '100vw' : state.width + 'px' }; height: { state.isMaximized ? 'calc(100vh - 48px)' : state.height + 'px' };"
+       onmousedown={ onFocus }>
+       
+    <!-- Window Resizer Handles (Only visible when not maximized) -->
+    <div if={ !state.isMaximized } class="resize-handle resize-right" onmousedown={ startResizeRight }></div>
+    <div if={ !state.isMaximized } class="resize-handle resize-bottom" onmousedown={ startResizeBottom }></div>
+    <div if={ !state.isMaximized } class="resize-handle resize-corner" onmousedown={ startResizeCorner }></div>
+
+    <!-- Title Bar -->
+    <div class="window-titlebar" onmousedown={ startDrag }>
+      <div class="window-title">
+        <span class="window-icon">
+          <!-- Small SVG icons based on props -->
+          <svg if={ props.icon === 'settings' } class="svg-icon" viewBox="0 0 24 24" style="width:16px;height:16px;">
+            <path fill="currentColor" d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.47,5.34 14.86,5.08L14.47,2.42C14.43,2.18 14.22,2 13.97,2H9.97C9.72,2 9.51,2.18 9.47,2.42L9.09,5.08C8.47,5.34 7.9,5.66 7.39,6.05L4.9,5.05C4.68,4.96 4.41,5.05 4.29,5.27L2.29,8.73C2.17,8.95 2.22,9.22 2.41,9.37L4.52,11C4.48,11.34 4.45,11.67 4.45,12C4.45,12.33 4.48,12.65 4.52,12.97L2.41,14.63C2.22,14.78 2.17,15.05 2.29,15.27L4.29,18.73C4.41,18.95 4.68,19.04 4.9,18.95L7.39,17.95C7.9,18.34 8.47,18.66 9.09,18.92L9.47,21.58C9.51,21.82 9.72,22 9.97,22H13.97C14.22,22 14.43,21.82 14.47,21.58L14.86,18.92C15.47,18.66 16.04,18.34 16.56,17.95L19.05,18.95C19.27,19.04 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
+          </svg>
+          <svg if={ props.icon !== 'settings' } class="svg-icon" viewBox="0 0 24 24" style="width:16px;height:16px;">
+            <path fill="currentColor" d="M19,4H5A2,2 0 0,0 3,6V18A2,2 0 0,0 5,20H19A2,2 0 0,0 21,18V6A2,2 0 0,0 19,4M19,18H5V8H19V18Z"/>
+          </svg>
+        </span>
+        { props.title }
+      </div>
+      <div class="window-controls">
+        <button class="window-btn minimize" onclick={ onMinimize }>
+          <svg viewBox="0 0 24 24" style="width:10px;height:10px;"><path fill="currentColor" d="M20,14H4V10H20V14Z"/></svg>
+        </button>
+        <button class="window-btn maximize" onclick={ toggleMaximize }>
+          <svg if={ !state.isMaximized } viewBox="0 0 24 24" style="width:10px;height:10px;"><path fill="currentColor" d="M4,4H20V20H4V4M6,8V18H18V8H6Z"/></svg>
+          <svg if={ state.isMaximized } viewBox="0 0 24 24" style="width:10px;height:10px;"><path fill="currentColor" d="M4,8H8V4H20V16H16V20H4V8M16,8V14H18V6H10V8H16M6,10V18H14V10H6Z"/></svg>
+        </button>
+        <button class="window-btn close" onclick={ onClose }>
+          <svg viewBox="0 0 24 24" style="width:10px;height:10px;"><path fill="currentColor" d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Window Body Context -->
+    <div class="window-body">
+      <slot />
+    </div>
+  </div>
+
+  <script>
+    export default {
+      state: {
+        x: 100,
+        y: 60,
+        width: 820,
+        height: 560,
+        isMaximized: false,
+        isActive: false
+      },
+      onBeforeMount(props, state) {
+        // Inherit coordinates if provided
+        if (props.x) state.x = props.x
+        if (props.y) state.y = props.y
+        state.isActive = props.active || false
+      },
+      onMounted() {
+        this.centerWindow()
+        this.updateActiveState()
+      },
+      onUpdated() {
+        this.updateActiveState()
+      },
+      updateActiveState() {
+        if (this.props.active !== this.state.isActive) {
+          this.update({ isActive: this.props.active })
+        }
+      },
+      centerWindow() {
+        // Shift window positions based on random offsets to prevent stacking overlaps
+        const offset = Math.floor(Math.random() * 40)
+        const screenW = window.innerWidth
+        const screenH = window.innerHeight
+        
+        const newX = Math.max(20, Math.floor((screenW - this.state.width) / 2) + offset - 100)
+        const newY = Math.max(20, Math.floor((screenH - this.state.height) / 2) + offset - 80)
+        
+        this.update({
+          x: newX,
+          y: newY
+        })
+      },
+      onFocus(e) {
+        if (this.props.onfocus) {
+          this.props.onfocus(this.props.id)
+        }
+      },
+      onClose(e) {
+        e.stopPropagation()
+        if (this.props.onclose) {
+          this.props.onclose(this.props.id)
+        }
+      },
+      onMinimize(e) {
+        e.stopPropagation()
+        if (this.props.onminimize) {
+          this.props.onminimize(this.props.id)
+        }
+      },
+      toggleMaximize(e) {
+        e.stopPropagation()
+        this.update({
+          isMaximized: !this.state.isMaximized
+        })
+      },
+      startDrag(e) {
+        if (this.state.isMaximized) return
+        e.preventDefault()
+        
+        const startX = e.clientX
+        const startY = e.clientY
+        const initialX = this.state.x
+        const initialY = this.state.y
+
+        const onMouseMove = (moveEvent) => {
+          const deltaX = moveEvent.clientX - startX
+          const deltaY = moveEvent.clientY - startY
+          
+          this.update({
+            x: initialX + deltaX,
+            y: Math.max(0, initialY + deltaY) // Block dragging off the screen top
+          })
+        }
+
+        const onMouseUp = () => {
+          document.removeEventListener('mousemove', onMouseMove)
+          document.removeEventListener('mouseup', onMouseUp)
+        }
+
+        document.addEventListener('mousemove', onMouseMove)
+        document.addEventListener('mouseup', onMouseUp)
+      },
+      startResizeRight(e) {
+        e.preventDefault()
+        e.stopPropagation()
+        const startX = e.clientX
+        const initialWidth = this.state.width
+
+        const onMouseMove = (moveEvent) => {
+          const deltaX = moveEvent.clientX - startX
+          this.update({
+            width: Math.max(350, initialWidth + deltaX)
+          })
+        }
+
+        const onMouseUp = () => {
+          document.removeEventListener('mousemove', onMouseMove)
+          document.removeEventListener('mouseup', onMouseUp)
+        }
+
+        document.addEventListener('mousemove', onMouseMove)
+        document.addEventListener('mouseup', onMouseUp)
+      },
+      startResizeBottom(e) {
+        e.preventDefault()
+        e.stopPropagation()
+        const startY = e.clientY
+        const initialHeight = this.state.height
+
+        const onMouseMove = (moveEvent) => {
+          const deltaY = moveEvent.clientY - startY
+          this.update({
+            height: Math.max(250, initialHeight + deltaY)
+          })
+        }
+
+        const onMouseUp = () => {
+          document.removeEventListener('mousemove', onMouseMove)
+          document.removeEventListener('mouseup', onMouseUp)
+        }
+
+        document.addEventListener('mousemove', onMouseMove)
+        document.addEventListener('mouseup', onMouseUp)
+      },
+      startResizeCorner(e) {
+        e.preventDefault()
+        e.stopPropagation()
+        const startX = e.clientX
+        const startY = e.clientY
+        const initialWidth = this.state.width
+        const initialHeight = this.state.height
+
+        const onMouseMove = (moveEvent) => {
+          const deltaX = moveEvent.clientX - startX
+          const deltaY = moveEvent.clientY - startY
+          this.update({
+            width: Math.max(350, initialWidth + deltaX),
+            height: Math.max(250, initialHeight + deltaY)
+          })
+        }
+
+        const onMouseUp = () => {
+          document.removeEventListener('mousemove', onMouseMove)
+          document.removeEventListener('mouseup', onMouseUp)
+        }
+
+        document.addEventListener('mousemove', onMouseMove)
+        document.addEventListener('mouseup', onMouseUp)
+      }
+    }
+  </script>
+</bolt10-window>
