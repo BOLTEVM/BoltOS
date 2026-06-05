@@ -21,7 +21,7 @@
 
 **Bolt10 OS (BoltOS)** is a premium, high-fidelity browser-based desktop environment meticulously engineered to manage, download, install, run, and diagnose all twelve decentralized applications (dApps) in the **BOLTEVM Multimedia Mine Suite**. 
 
-Built utilizing **Riot.js 10** and **Vite** on the frontend, and backed by an ultra-fast **Node.js** Express server utilizing **better-sqlite3** and high-speed **WebSockets** on the backend, Bolt10 OS integrates directly with your physical Windows workspace directory (`C:/Users/wonfi/Documents`) to deliver seamless self-custody operations with zero overhead and premium industrial aesthetics.
+Built utilizing **Riot.js 10** and **Vite** on the frontend, and backed by an ultra-fast **Node.js** Express server utilizing **better-sqlite3** and high-speed **WebSockets** on the backend, Bolt10 OS integrates directly with your physical Windows workspace directory (`C:/Users/<YourUsername>/Documents`) to deliver seamless self-custody operations with zero overhead and premium industrial aesthetics.
 
 Designed with a sleek, vintage-modern **Windows 10 styling paradigm (Bolt10)**, the interface presents a cohesive operating environment including acrylic glassmorphic windows, customized Start Menu Live Tiles, search filters, system trays, dynamic telemetry logs, and a self-updating patcher.
 
@@ -132,7 +132,7 @@ boltOS/
 
 1. **Clone this repository** into your Windows Documents directory:
    ```bash
-   cd C:\Users\wonfi\Documents
+   cd C:\Users\<YourUsername>\Documents
    git clone https://github.com/BOLTEVM/BoltOS.git boltos
    cd boltos
    ```
@@ -160,7 +160,7 @@ boltOS/
 
 ## 🎛️ The Twelve Suite Applications Spec
 
-Each application is expected to reside in `C:\Users\wonfi\Documents\<Workspace Folder>` and will be executed by Bolt10 OS using the configured command and port.
+Each application is expected to reside in `C:\Users\<YourUsername>\Documents\<Workspace Folder>` and will be executed by Bolt10 OS using the configured command and port.
 
 | ID | Name | Workspace Folder | Default Port | Launch Command | Tech Stack Substrate |
 |---|---|---|---|---|---|
