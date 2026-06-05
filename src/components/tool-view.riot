@@ -15,6 +15,8 @@
             <span if={ props.tool.icon === 'game-engine' }>🎮</span>
             <span if={ props.tool.icon === 'world-gen' }>🌍</span>
             <span if={ props.tool.icon === 'btai' }>🧠</span>
+            <span if={ props.tool.icon === 'broadcaster' }>📹</span>
+            <span if={ props.tool.icon === 'gov' }>🏛️</span>
             <span if={ props.tool.icon.startsWith('miner') }>⛏️</span>
           </div>
           <h2 class="tool-title">{ props.tool.name }</h2>
@@ -83,6 +85,12 @@
           </button>
 
           <!-- Running/Stop Button -->
+          <button if={ props.tool.status === 'RUNNING' } 
+                  class="tool-btn btn-primary" 
+                  style="margin-bottom: 6px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; border: none;"
+                  onclick={ openAppUrl }>
+            🌐 Open Application
+          </button>
           <button if={ props.tool.status === 'RUNNING' } 
                   class="tool-btn btn-danger" 
                   onclick={ stopTool }>
@@ -293,6 +301,10 @@
             }
           })
           .catch(err => console.error(err))
+      },
+      openAppUrl(e) {
+        e.stopPropagation()
+        window.open(`http://localhost:${this.props.tool.default_port}`, '_blank')
       },
       saveCustomPort(e) {
         e.stopPropagation()

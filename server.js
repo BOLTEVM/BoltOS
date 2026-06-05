@@ -224,6 +224,34 @@ const toolsSeed = [
     'npm run dev',
     'NOT_INSTALLED',
     'miner-fractal'
+  ],
+  [
+    13,
+    'BOBS Broadcaster',
+    'bobs',
+    'https://github.com/BOLTEVM/BUNOBS.git',
+    3009,
+    'Bun Open Broadcasting Software. High-fidelity, web-based broadcasting studio and real-time composition framework. Features dual-canvas Studio Mode, WYSIWYG scene editor, vertical LED decibel mixer, and native Bun FFmpeg streaming/recording pipeline.',
+    'TypeScript, Bun, React 18, FFmpeg, WebSockets, HTML5 Canvas',
+    'WS Stream: Latency <100ms slices | Compositor: 60fps canvas overlays | Audio Mixer: 60fps AnalyserNode peak level updates',
+    'bun install && bun run build',
+    'bun run start',
+    'NOT_INSTALLED',
+    'broadcaster'
+  ],
+  [
+    14,
+    'Bolt Governance Portal',
+    'bdta',
+    'https://github.com/BOLTEVM/bdta.git',
+    3010,
+    'Next-generation decentralized governance and voting portal for Bolt DAO. Features space profiles, Snapshot EIP-712 cryptographic signing, discussions dashboard, treasury overview, and voice-locked voting widgets.',
+    'Vue 3, TypeScript, Vite, Privy Auth, Ethers.js, Snapshot SDK',
+    'Cryptographic Signing: EIP-712 <50ms | Ledger Sync: Sub-second proposal updates | Voice Voting Resolver: <100ms proof validation',
+    'bun install',
+    'bun run dev',
+    'NOT_INSTALLED',
+    'gov'
   ]
 ]
 
@@ -243,7 +271,9 @@ const activeProcesses = new Map()
 
 // Express App setup
 const app = express()
-app.use(cors())
+app.use(cors({
+  origin: 'http://localhost:5173'
+}))
 app.use(express.json())
 app.use(express.static(path.join(__dirname, 'dist')))
 
@@ -273,8 +303,13 @@ const scanWorkspaceFolders = () => {
   }
 }
 
-// Run initial scan
+// Run initial scan & log database pruning
 scanWorkspaceFolders()
+try {
+  db.prepare('DELETE FROM process_logs WHERE id NOT IN (SELECT id FROM process_logs ORDER BY id DESC LIMIT 1000)').run()
+} catch (e) {
+  console.warn('Failed to prune database logs on startup:', e.message)
+}
 
 // API: Get settings
 app.get('/api/settings', (req, res) => {
@@ -436,9 +471,18 @@ app.post('/api/tools/:id/port', (req, res) => {
 let wsClients = []
 
 // Helper: log to database & stream to websockets
+let logCounter = 0
 const logMessage = (toolId, stream, message) => {
   try {
     db.prepare('INSERT INTO process_logs (tool_id, stream, message) VALUES (?, ?, ?)').run(toolId, stream, message)
+    
+    // Prune logs periodically (every 50 messages) to keep database size capped
+    logCounter++
+    if (logCounter >= 50) {
+      logCounter = 0
+      db.prepare('DELETE FROM process_logs WHERE id NOT IN (SELECT id FROM process_logs ORDER BY id DESC LIMIT 1000)').run()
+    }
+
     const payload = JSON.stringify({ type: 'log', toolId, stream, message, timestamp: new Date().toISOString() })
     wsClients.forEach(client => {
       if (client.readyState === 1) {
@@ -639,17 +683,28 @@ app.post('/api/terminal', (req, res) => {
   } else if (command.startsWith('echo')) {
     res.json({ output: command.slice(5) })
   } else if (command.startsWith('sqlite')) {
-    try {
-      const query = command.slice(7)
-      const stmt = db.prepare(query)
-      const results = stmt.all ? stmt.all() : stmt.run()
-      res.json({ output: JSON.stringify(results, null, 2) })
-    } catch (err) {
-      res.status(500).json({ error: err.message })
-    }
+    res.json({ output: 'Error: Arbitrary SQLite query execution is disabled for security reasons.' })
   } else {
     res.json({ output: `Command '${command}' executed in sandboxed space. For safety, full arbitrary bash is disabled. Use explicit Tool controls.` })
   }
+})
+
+// API: Clear all telemetry logs safely
+app.post('/api/logs/clear', (req, res) => {
+  try {
+    db.prepare('DELETE FROM process_logs').run()
+    res.json({ success: true, message: 'SQLite process logs cleared successfully' })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// API: Shutdown Express backend environment safely
+app.post('/api/system/shutdown', (req, res) => {
+  res.json({ success: true, message: 'Shutting down backend, terminating running tool processes...' })
+  setTimeout(() => {
+    shutdown()
+  }, 500)
 })
 
 // Server fallback route for Spa client
@@ -695,8 +750,8 @@ const runCommand = (cwd, cmd, args, toolId) => {
 }
 
 // Start Server
-const server = app.listen(PORT, () => {
-  console.log(`Express API Server listening on port ${PORT}`)
+const server = app.listen(PORT, '127.0.0.1', () => {
+  console.log(`Express API Server listening on port ${PORT} (bound to localhost)`)
 })
 
 // Start WebSocket Server
@@ -715,7 +770,7 @@ wss.on('connection', (ws) => {
 })
 
 // Cleanup active processes on server shutdown
-const shutdown = () => {
+function shutdown() {
   console.log('Shutting down backend, terminating running tool processes...')
   activeProcesses.forEach((child, toolId) => {
     try {

@@ -19,6 +19,8 @@
           <span if={ tool.icon === 'game-engine' } style="font-size: 2.2rem">🎮</span>
           <span if={ tool.icon === 'world-gen' } style="font-size: 2.2rem">🌍</span>
           <span if={ tool.icon === 'btai' } style="font-size: 2.2rem">🧠</span>
+          <span if={ tool.icon === 'broadcaster' } style="font-size: 2.2rem">📹</span>
+          <span if={ tool.icon === 'gov' } style="font-size: 2.2rem">🏛️</span>
           <span if={ tool.icon.startsWith('miner') } style="font-size: 2.2rem">⛏️</span>
         </div>
         <div class="desktop-icon-text">{ tool.name }</div>
@@ -99,6 +101,8 @@
             <span if={ tool.icon === 'game-engine' }>🎮</span>
             <span if={ tool.icon === 'world-gen' }>🌍</span>
             <span if={ tool.icon === 'btai' }>🧠</span>
+            <span if={ tool.icon === 'broadcaster' }>📹</span>
+            <span if={ tool.icon === 'gov' }>🏛️</span>
             <span if={ tool.icon.startsWith('miner') }>⛏️</span>
           </div>
           <div class="start-app-item-name">{ tool.name }</div>
@@ -194,6 +198,8 @@
             <span if={ win.icon === 'game-engine' } style="font-size: 1.3rem">🎮</span>
             <span if={ win.icon === 'world-gen' } style="font-size: 1.3rem">🌍</span>
             <span if={ win.icon === 'btai' } style="font-size: 1.3rem">🧠</span>
+            <span if={ win.icon === 'broadcaster' } style="font-size: 1.3rem">📹</span>
+            <span if={ win.icon === 'gov' } style="font-size: 1.3rem">🏛️</span>
             <span if={ win.icon && win.icon.startsWith('miner') } style="font-size: 1.3rem">⛏️</span>
           </div>
         </div>
@@ -506,10 +512,9 @@
       shutdownBackend(e) {
         e.stopPropagation()
         if (confirm('Shut down the active Node Express backend environment? All running tools will be stopped.')) {
-          fetch('/api/terminal', {
+          fetch('/api/system/shutdown', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: 'sqlite DELETE FROM tools WHERE id = 0' }) // Trigger server exit implicitly by calling an unknown command or writing exit handler
+            headers: { 'Content-Type': 'application/json' }
           }).then(() => {
             alert('Powering off background processes. Tab can now be closed safely.')
             window.close()
