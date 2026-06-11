@@ -1,0 +1,38 @@
+# =============================================================================
+# BoltOS Docker Compose Stack (Hardened)
+# Multi-chain wallet client served via port 8080 as non-root user
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # BoltOS Web Client Dashboard
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - VITE_BOLT_API_KEY=${VITE_BOLT_API_KEY:-8355b81654fd5755222cdbee64b257e925a97cc56ad4660f55a632201a25997c}
+        - VITE_PINATA_API_KEY=${VITE_PINATA_API_KEY:-}
+    container_name: boltos-web
+    ports:
+      - "8080:8080" # Map host 8080 to container 8080
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    networks:
+      - boltos
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  boltos:
+    driver: bridge

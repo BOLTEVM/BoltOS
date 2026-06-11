@@ -39,3 +39,8 @@ pnpm-debug.log*
 
 # Vercel
 .vercel
+
+# Local manual test files
+test-*.js
+test-launch.js
+

@@ -44,6 +44,7 @@ import { WalletData, ContractData, NFTData, CHAINS, HistoryData, LogEvent, Boltw
 import { ethers } from 'ethers';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { QRCodeSVG } from 'qrcode.react';
+import BustaBoltApp from './components/BustaBoltApp';
 
 const core = new BoltwalletCore() as any;
 
@@ -109,6 +110,251 @@ const QRScannerOverlay = ({ onScan, onClose }: { onScan: (text: string) => void,
       </div>
       <button onClick={onClose} className="mt-8 px-8 py-3 rounded-2xl bg-white/10 border border-white/10 text-white font-black uppercase tracking-widest text-xs hover:bg-white/20 transition-all">Close Scanner</button>
     </div>
+  );
+};
+
+interface AppDefinition {
+  id: string;
+  title: string;
+  icon: React.ComponentType<any>;
+  color: string;
+  defaultWidth: number;
+  defaultHeight: number;
+  bootSteps: string[];
+}
+
+const APPS: Record<string, AppDefinition> = {
+  wallet: {
+    id: 'wallet',
+    title: 'Bolt Wallet',
+    icon: Wallet,
+    color: '#00D1FF',
+    defaultWidth: 420,
+    defaultHeight: 700,
+    bootSteps: [
+      'Mounting secure local enclave...',
+      'Verifying key store signature...',
+      'Attaching OWS cryptoprovider...',
+      'Connecting to Monad RPC nodes...',
+      'Syncing asset balances...',
+      'Bolt Wallet active.'
+    ]
+  },
+  bustabolt: {
+    id: 'bustabolt',
+    title: 'BustaBolt Game',
+    icon: Activity,
+    color: '#C084FC',
+    defaultWidth: 900,
+    defaultHeight: 600,
+    bootSteps: [
+      'Establishing socket connections...',
+      'Retrieving gaming contract ABI...',
+      'Mapping random seed generators...',
+      'Pre-loading graphical textures...',
+      'Game engine synchronized.'
+    ]
+  },
+  logs: {
+    id: 'logs',
+    title: 'Telemetry Log Console',
+    icon: Terminal,
+    color: '#4ADE80',
+    defaultWidth: 700,
+    defaultHeight: 480,
+    bootSteps: [
+      'Binding debug event listeners...',
+      'Allocating circular memory log buffer...',
+      'Compiling telemetry reports...',
+      'Console stream initialized.'
+    ]
+  },
+  settings: {
+    id: 'settings',
+    title: 'Vault Settings',
+    icon: Settings,
+    color: '#FB923C',
+    defaultWidth: 700,
+    defaultHeight: 600,
+    bootSteps: [
+      'Authenticating system settings access...',
+      'Parsing local preferences...',
+      'Loading visual theme registry...',
+      'Settings configurations active.'
+    ]
+  }
+};
+
+const DesktopWindow = ({ 
+  id, 
+  title, 
+  onClose, 
+  isActive, 
+  onFocus, 
+  isMinimized, 
+  onMinimize, 
+  children, 
+  defaultWidth = 800, 
+  defaultHeight = 550,
+  launchState,
+  launchProgress,
+  launchLogs,
+  skipBoot
+}: any) => {
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [size, setSize] = useState({ width: defaultWidth, height: defaultHeight });
+
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startW = size.width;
+    const startH = size.height;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const deltaY = moveEvent.clientY - startY;
+      const newWidth = Math.max(320, startW + deltaX);
+      const newHeight = Math.max(300, startH + deltaY);
+      setSize({ width: newWidth, height: newHeight });
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const appColor = APPS[id]?.color || '#00D1FF';
+
+  return (
+    <motion.div 
+      drag={!isMaximized}
+      dragHandleClassName="window-drag-handle"
+      dragMomentum={false}
+      dragElastic={0}
+      initial={{ 
+        scale: 0.95, 
+        opacity: 0, 
+        x: id === 'wallet' ? 80 : id === 'bustabolt' ? 420 : id === 'settings' ? 300 : 220, 
+        y: id === 'wallet' ? 40 : id === 'bustabolt' ? 60 : id === 'settings' ? 100 : 120 
+      }}
+      animate={isMinimized ? { scale: 0.8, opacity: 0, y: 150 } : { scale: 1, opacity: 1, y: 0 }}
+      transition={{ duration: 0.25, ease: 'easeOut' }}
+      onClick={onFocus}
+      style={{ 
+        width: isMaximized ? '100%' : size.width, 
+        height: isMaximized ? 'calc(100vh - 120px)' : size.height, 
+        zIndex: isActive ? 50 : 20,
+        position: 'absolute',
+        top: isMaximized ? 0 : undefined,
+        left: isMaximized ? 0 : undefined,
+        pointerEvents: isMinimized ? 'none' : 'auto',
+      }}
+      className={`glass-glossy flex flex-col rounded-2xl border border-white/10 overflow-hidden shadow-2xl transition-all duration-200 ${isActive ? 'shadow-[0_0_30px_rgba(0,209,255,0.08)] border-white/20' : ''}`}
+    >
+      {/* Window Title Bar */}
+      <div 
+        className="window-drag-handle flex items-center justify-between pl-5 bg-white/[0.03] border-b border-white/5 cursor-move select-none"
+        onDoubleClick={() => setIsMaximized(!isMaximized)}
+      >
+        <div className="flex items-center gap-2.5 pointer-events-none py-2.5">
+          <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: isActive ? appColor : '#4b5563' }} />
+          <span className="text-[10px] font-black uppercase tracking-widest text-white/80">{title}</span>
+        </div>
+        
+        {/* Retro Windows 10 Controls */}
+        <div className="flex items-center">
+          <button 
+            onClick={(e) => { e.stopPropagation(); onMinimize(); }} 
+            className="w-11 h-8 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+            title="Minimize"
+          >
+            <span className="text-[14px] leading-none select-none font-bold">―</span>
+          </button>
+          <button 
+            onClick={(e) => { e.stopPropagation(); setIsMaximized(!isMaximized); }} 
+            className="w-11 h-8 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+            title={isMaximized ? "Restore Down" : "Maximize"}
+          >
+            {isMaximized ? (
+              <span className="text-[12px] leading-none select-none font-black">🗗</span>
+            ) : (
+              <span className="text-[12px] leading-none select-none font-bold">▢</span>
+            )}
+          </button>
+          <button 
+            onClick={(e) => { e.stopPropagation(); onClose(); }} 
+            className="w-11 h-8 flex items-center justify-center text-white/70 hover:text-white hover:bg-red-600 hover:text-white transition-colors"
+            title="Close"
+          >
+            <span className="text-[18px] leading-none select-none font-light">×</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-hidden min-h-0 bg-black/25 relative">
+        {launchState === 'launching' ? (
+          <div className="absolute inset-0 z-50 bg-[#06070a]/95 flex flex-col items-center justify-center p-8 text-center font-mono">
+            <div className="relative w-20 h-20 mb-6 flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full border-4 border-white/5" />
+              <div 
+                className="absolute inset-0 rounded-full border-4 border-t-transparent animate-spin" 
+                style={{ borderColor: `${appColor} rgba(255,255,255,0.05) rgba(255,255,255,0.05)`, borderTopColor: 'transparent' }} 
+              />
+              <span className="text-xs font-black" style={{ color: appColor }}>{launchProgress}%</span>
+            </div>
+            
+            <h3 className="text-[9px] font-black uppercase tracking-[0.3em] text-white/80 mb-5">
+              Booting {title}
+            </h3>
+
+            <div className="w-full max-w-xs h-28 bg-black/40 border border-white/5 rounded-xl p-3.5 overflow-y-auto text-left text-[8px] text-white/50 space-y-1 scrollbar-hide">
+              {launchLogs?.map((log: string, idx: number) => (
+                <div key={idx} className="truncate select-none">
+                  {log.startsWith('[OK]') ? (
+                    <span className="text-green-400 font-bold mr-1.5">[OK]</span>
+                  ) : log.startsWith('[SYS]') ? (
+                    <span className="text-blue-400 font-bold mr-1.5">[SYS]</span>
+                  ) : null}
+                  {log.replace(/^\[(OK|SYS)\]\s*/, '')}
+                </div>
+              ))}
+            </div>
+
+            <button 
+              onClick={(e) => { e.stopPropagation(); skipBoot(); }} 
+              className="mt-5 px-3 py-1 rounded bg-white/5 border border-white/10 hover:bg-white/10 text-[7px] font-black uppercase tracking-widest text-white/40 hover:text-white transition-all"
+            >
+              Skip Init
+            </button>
+          </div>
+        ) : null}
+
+        <div className={`w-full h-full transition-opacity duration-300 ${launchState === 'launching' ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+          {children}
+        </div>
+      </div>
+
+      {/* Resize Handle */}
+      {!isMaximized && (
+        <div 
+          onMouseDown={handleResizeStart}
+          className="absolute bottom-0 right-0 w-3.5 h-3.5 cursor-se-resize z-50 flex items-end justify-end p-0.5"
+        >
+          <svg width="8" height="8" viewBox="0 0 10 10" className="text-white/20 hover:text-white/60 transition-colors">
+            <line x1="8" y1="2" x2="2" y2="8" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+            <line x1="8" y1="5" x2="5" y2="8" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+            <line x1="8" y1="8" x2="8" y2="8" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+          </svg>
+        </div>
+      )}
+    </motion.div>
   );
 };
 
@@ -208,8 +454,414 @@ const App = () => {
   const [swapSlippage, setSwapSlippage] = useState(0.005); // 0.5% default
   const [swapError, setSwapError] = useState('');
   const [showAddNetwork, setShowAddNetwork] = useState(false);
+  const [showBustaBolt, setShowBustaBolt] = useState(false);
+  const [openApps, setOpenApps] = useState<string[]>(['wallet']);
+  const [activeApp, setActiveApp] = useState<string>('wallet');
+  const [minimizedApps, setMinimizedApps] = useState<string[]>([]);
+  const [appLaunchStates, setAppLaunchStates] = useState<Record<string, 'idle' | 'launching' | 'ready'>>({});
+  const [appLaunchProgress, setAppLaunchProgress] = useState<Record<string, number>>({});
+  const [appLaunchLogs, setAppLaunchLogs] = useState<Record<string, string[]>>({});
+  const [skipBootAnimation, setSkipBootAnimation] = useState<boolean>(() => {
+    return localStorage.getItem('boltos_skip_boot') === 'true';
+  });
+
+  const addCustomLog = (type: string, message: string, status: 'info' | 'success' | 'warning' | 'error' = 'info', metadata?: any) => {
+    const newLog: LogEvent = {
+      id: Math.random().toString(),
+      type,
+      message,
+      status,
+      timestamp: Date.now(),
+      metadata
+    } as any;
+    setLogs(prev => [...prev, newLog].slice(-100));
+  };
   const [customNetworks, setCustomNetworks] = useState<any[]>([]);
   const [newNetwork, setNewNetwork] = useState({ name: '', id: '', rpc: '', explorer: '', currencySymbol: '', currencyName: '', decimals: 18 });
+
+  // Boot telemetry progression effect
+  useEffect(() => {
+    openApps.forEach(appId => {
+      if (!appLaunchStates[appId]) {
+        if (skipBootAnimation) {
+          setAppLaunchStates(prev => ({ ...prev, [appId]: 'ready' }));
+        } else {
+          setAppLaunchStates(prev => ({ ...prev, [appId]: 'launching' }));
+          setAppLaunchProgress(prev => ({ ...prev, [appId]: 0 }));
+          setAppLaunchLogs(prev => ({ ...prev, [appId]: ['[SYS] Initializing launch thread...'] }));
+        }
+      }
+    });
+  }, [openApps, skipBootAnimation]);
+
+  useEffect(() => {
+    const launchingApps = Object.keys(appLaunchStates).filter(id => appLaunchStates[id] === 'launching');
+    if (launchingApps.length === 0) return;
+
+    const interval = setInterval(() => {
+      launchingApps.forEach(appId => {
+        const currentProgress = appLaunchProgress[appId] ?? 0;
+        if (currentProgress >= 100) {
+          setAppLaunchStates(prev => ({ ...prev, [appId]: 'ready' }));
+        } else {
+          const newProgress = Math.min(100, currentProgress + 10);
+          setAppLaunchProgress(prev => ({ ...prev, [appId]: newProgress }));
+
+          const appDef = APPS[appId];
+          if (appDef) {
+            const stepIndex = Math.floor((newProgress / 100) * appDef.bootSteps.length);
+            const logsToAdd = appDef.bootSteps.slice(0, Math.max(1, stepIndex));
+            setAppLaunchLogs(prev => ({
+              ...prev,
+              [appId]: [
+                '[SYS] Bootstrapping system architecture...',
+                ...logsToAdd.map(step => `[OK] ${step}`),
+                ...(newProgress === 100 ? ['[SYS] Core process launched. Handshaking complete.'] : [])
+              ]
+            }));
+          }
+        }
+      });
+    }, 200);
+
+    return () => clearInterval(interval);
+  }, [appLaunchStates, appLaunchProgress]);
+
+  const handleDockClick = (appId: string) => {
+    if (!openApps.includes(appId)) {
+      setOpenApps(prev => [...prev, appId]);
+      setMinimizedApps(prev => prev.filter(id => id !== appId));
+      setActiveApp(appId);
+    } else if (minimizedApps.includes(appId)) {
+      setMinimizedApps(prev => prev.filter(id => id !== appId));
+      setActiveApp(appId);
+    } else if (activeApp === appId) {
+      setMinimizedApps(prev => [...prev, appId]);
+      const remainingOpen = openApps.filter(id => id !== appId && !minimizedApps.includes(id));
+      if (remainingOpen.length > 0) {
+        setActiveApp(remainingOpen[remainingOpen.length - 1]);
+      } else {
+        setActiveApp('');
+      }
+    } else {
+      setActiveApp(appId);
+    }
+  };
+
+  const renderSettingsContent = () => {
+    return (
+      <div className="h-full flex flex-col p-6 text-white overflow-hidden bg-black/10 select-none">
+        {/* Settings Tabs */}
+        <div className="flex gap-2 p-1.5 bg-white/5 rounded-[22px] mb-6 relative z-10 border border-white/5">
+          {[
+             { id: 'general', icon: ShieldCheck, label: 'Vault' },
+             { id: 'appearance', icon: Palette, label: 'Look' },
+             { id: 'currency', icon: Banknote, label: 'Cash' },
+             { id: 'extension', icon: Cpu, label: 'Bolt' },
+             { id: 'logs', icon: Terminal, label: 'Logs' }
+          ].filter(t => t.id !== 'extension' || isPopup).map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setSettingsTab(tab.id as any)}
+              className={`flex-1 py-3 px-2 rounded-[18px] transition-all duration-500 flex flex-col items-center gap-1.5 relative group ${settingsTab === tab.id ? 'bg-white/10 shadow-[0_0_20px_rgba(255,255,255,0.05)]' : 'hover:bg-white/[0.03]'}`}
+            >
+              <tab.icon className={`w-4 h-4 transition-all duration-300 ${settingsTab === tab.id ? 'scale-110' : 'text-gray-500 group-hover:text-gray-300'}`} style={{ color: settingsTab === tab.id ? theme.primary : undefined }} />
+              <span className={`text-[8px] font-black uppercase tracking-[0.2em] transition-all ${settingsTab === tab.id ? 'text-white' : 'text-gray-600 group-hover:text-gray-400'}`}>{tab.label}</span>
+              {settingsTab === tab.id && (
+                 <motion.div layoutId="activeTab" className="absolute -bottom-1 w-1 h-1 rounded-full" style={{ backgroundColor: theme.primary, boxShadow: `0 0 10px ${theme.primary}` }} />
+              )}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1 overflow-y-auto pr-1 space-y-6 scrollbar-hide">
+          {settingsTab === 'general' && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+              <div className="relative">
+                <div className="flex justify-between items-center mb-4">
+                   <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">Security Phrase</p>
+                   <div className="px-2 py-0.5 rounded-md bg-green-500/10 border border-green-500/20 text-[7px] font-black text-green-500 uppercase tracking-widest">Encrypted</div>
+                </div>
+                
+                <div className="p-8 rounded-[32px] bg-white/[0.03] border border-white/5 relative overflow-hidden group shadow-2xl">
+                  <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent pointer-events-none" />
+                  
+                  <div className={`grid grid-cols-3 gap-3 transition-all duration-700 ${!showMnemonicPlain ? 'blur-2xl opacity-20 scale-95 select-none' : 'opacity-100 scale-100'}`}>
+                    {(showMnemonicPlain ? (mnemonic || "word ".repeat(12)).split(' ') : Array(12).fill('••••')).map((word, i) => (
+                      <div key={i} className="bg-white/5 rounded-xl py-2.5 px-3 border border-white/5 flex flex-col items-center gap-1 group/word hover:bg-white/10 transition-all">
+                         <span className="text-[7px] font-black text-gray-700 uppercase">{i + 1}</span>
+                         <span className="text-[11px] font-black tracking-tight" style={{ color: theme.primary }}>{word}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button 
+                    onClick={async () => {
+                      if (!showMnemonicPlain && !mnemonic) {
+                        const mnemon = await core.getSession();
+                        setMnemonic(mnemon || '');
+                      }
+                      setShowMnemonicPlain(!showMnemonicPlain);
+                    }}
+                    className={`absolute inset-0 flex flex-col items-center justify-center transition-all duration-500 z-20 ${showMnemonicPlain ? 'opacity-0 pointer-events-none' : 'bg-black/40 backdrop-blur-md opacity-100'}`}
+                  >
+                     <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-3 shadow-2xl group-hover:scale-110 transition-transform">
+                        <Eye className="w-6 h-6 text-white" />
+                     </div>
+                     <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white">Reveal Vault Phrase</span>
+                  </button>
+                </div>
+
+                {showMnemonicPlain && (
+                   <div className="flex justify-center mt-4">
+                      <button onClick={() => setShowMnemonicPlain(false)} className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-all">
+                         <EyeOff className="w-3 h-3 text-gray-500" />
+                         <span className="text-[9px] font-black uppercase tracking-widest text-gray-500">Hide Phrase</span>
+                      </button>
+                   </div>
+                )}
+              </div>
+
+              <div className="pt-6 border-t border-white/5">
+                <div className="flex items-center justify-between p-5 rounded-[24px] bg-white/[0.03] border border-white/5">
+                  <div>
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">OS Boot Telemetry</p>
+                    <p className="text-[8px] text-gray-600 font-bold uppercase tracking-wider">Skip app loading sequences on launch</p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      const val = !skipBootAnimation;
+                      setSkipBootAnimation(val);
+                      localStorage.setItem('boltos_skip_boot', val ? 'true' : 'false');
+                    }}
+                    className={`w-12 h-6 rounded-full p-1 transition-all duration-300 ${skipBootAnimation ? 'bg-bolt-blue' : 'bg-white/10 border border-white/10'}`}
+                    style={{ backgroundColor: skipBootAnimation ? theme.primary : undefined }}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-white transition-all duration-300 ${skipBootAnimation ? 'translate-x-6' : 'translate-x-0'}`} />
+                  </button>
+                </div>
+              </div>
+              
+              <div className="pt-6 border-t border-white/5">
+                  <div className="flex items-center gap-2 mb-4">
+                     <p className="text-[10px] font-black text-red-500/60 uppercase tracking-[0.3em]">Danger Zone</p>
+                     <div className="h-[1px] flex-1 bg-red-500/10" />
+                  </div>
+                  <Button 
+                    variant="glass" 
+                    className="w-full border-red-500/10 text-red-500/80 hover:text-red-400 hover:bg-red-500/10 py-5 rounded-[24px] text-[10px] font-black uppercase tracking-widest shadow-lg flex items-center justify-center gap-3 transition-all" 
+                    onClick={handleResetVault}
+                  >
+                     <Trash2 className="w-4 h-4 opacity-50" />
+                     Reset Vault Data
+                  </Button>
+              </div>
+            </div>
+          )}
+          {settingsTab === 'appearance' && (
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em] mb-6">Master Themes</p>
+                <div className="grid grid-cols-2 gap-4">
+                  {THEMES.map((t, idx) => (
+                    <motion.div 
+                      key={t.id}
+                      whileHover={{ y: -4, scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => setCurrentThemeIdx(idx)}
+                      className={`p-5 rounded-[28px] border-2 cursor-pointer transition-all flex flex-col items-center gap-4 relative overflow-hidden group ${currentThemeIdx === idx ? 'bg-white/10 border-white/20 shadow-2xl' : 'bg-white/5 border-transparent hover:bg-white/10'}`}
+                    >
+                      <div className="absolute top-0 right-0 w-16 h-16 blur-2xl rounded-full -mr-8 -mt-8 opacity-20" style={{ backgroundColor: t.primary }} />
+                      <div className="w-12 h-12 rounded-2xl shadow-2xl flex items-center justify-center transition-transform group-hover:rotate-12" style={{ background: `linear-gradient(135deg, ${t.primary}, ${t.secondary})` }}>
+                         <Palette className="w-6 h-6 text-white" />
+                      </div>
+                      <span className="text-[10px] font-black tracking-[0.2em] text-white uppercase">{t.name}</span>
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-8 border-t border-white/5">
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em] mb-6">Engine Overrides</p>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-6 rounded-[24px] bg-white/[0.03] border border-white/5 group hover:bg-white/5 transition-all">
+                    <div className="flex items-center gap-4">
+                       <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: customColors.primary }} />
+                       <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Primary Core</span>
+                    </div>
+                    <input 
+                      type="color" 
+                      value={customColors.primary} 
+                      onChange={(e) => setCustomColors({ ...customColors, primary: e.target.value })}
+                      className="bg-transparent border-none w-10 h-10 cursor-pointer rounded-2xl overflow-hidden shadow-2xl"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between p-6 rounded-[24px] bg-white/[0.03] border border-white/5 group hover:bg-white/5 transition-all">
+                    <div className="flex items-center gap-4">
+                       <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: customColors.secondary }} />
+                       <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Accent Glow</span>
+                    </div>
+                    <input 
+                      type="color" 
+                      value={customColors.secondary} 
+                      onChange={(e) => setCustomColors({ ...customColors, secondary: e.target.value })}
+                      className="bg-transparent border-none w-10 h-10 cursor-pointer rounded-2xl overflow-hidden shadow-2xl"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {settingsTab === 'currency' && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+              <div>
+                <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em] mb-6">Settlement Currency</p>
+                <div className="grid grid-cols-1 gap-3">
+                  {[
+                    { id: 'USD', name: 'US Dollar', icon: '🇺🇸' },
+                    { id: 'EUR', name: 'Euro', icon: '🇪🇺' },
+                    { id: 'GBP', name: 'British Pound', icon: '🇬🇧' },
+                    { id: 'JPY', name: 'Japanese Yen', icon: '🇯🇵' },
+                    { id: 'CNY', name: 'Chinese Yuan', icon: '🇨🇳' },
+                    { id: 'BTC', name: 'Bitcoin', icon: '₿' },
+                    { id: 'ETH', name: 'Ethereum', icon: 'Ξ' }
+                  ].map(c => (
+                    <motion.div 
+                      key={c.id}
+                      whileHover={{ x: 4 }}
+                      onClick={() => setSelectedCurrency(c.id)}
+                      className={`p-5 rounded-[24px] border transition-all cursor-pointer flex items-center justify-between group ${selectedCurrency === c.id ? 'bg-white/10 border-white/20 shadow-xl' : 'bg-white/[0.03] border-transparent hover:bg-white/5'}`}
+                    >
+                      <div className="flex items-center gap-4">
+                         <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-xl shadow-inner group-hover:scale-110 transition-transform">
+                            {c.icon}
+                         </div>
+                         <div>
+                            <p className="text-xs font-black text-white">{c.name}</p>
+                            <p className="text-[9px] font-bold text-gray-600 uppercase tracking-widest">{c.id}</p>
+                         </div>
+                      </div>
+                      {selectedCurrency === c.id && (
+                         <div className="w-6 h-6 rounded-full flex items-center justify-center bg-white/10" style={{ color: theme.primary }}>
+                            <CheckCircle2 className="w-4 h-4" />
+                          </div>
+                      )}
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {settingsTab === 'logs' && (
+            <div className="h-full flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-500">
+              <div className="flex justify-between items-center mb-6">
+                <div className="flex items-center gap-3">
+                   <Activity className="w-4 h-4 text-gray-500 animate-pulse" />
+                   <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">Telemetry Stream</p>
+                </div>
+                <div className="flex gap-4">
+                   <button onClick={() => setLogs([])} className="text-[9px] font-black text-red-500/60 uppercase tracking-widest hover:text-red-400 transition-colors">Wipe Console</button>
+                   <button className="text-[9px] font-black text-blue-500/60 uppercase tracking-widest hover:text-blue-400 transition-colors flex items-center gap-1.5">
+                      <Download className="w-3 h-3" />
+                      Export
+                   </button>
+                </div>
+              </div>
+              <div className="flex-1 bg-[#050608] rounded-[32px] border border-white/5 p-6 font-mono text-[9px] overflow-y-auto space-y-4 min-h-[300px] shadow-inner scrollbar-hide">
+                {!logs || logs.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center opacity-10 gap-4">
+                     <RefreshCw className="w-10 h-10 animate-spin-slow" />
+                     <p className="uppercase tracking-[0.5em] font-black text-xs">Awaiting Network Events...</p>
+                  </div>
+                ) : (
+                  (logs || []).slice().reverse().map(log => (
+                    <div key={log?.id || Math.random().toString()} className="border-b border-white/[0.02] pb-4 last:border-0 group/log">
+                      <div className="flex items-center gap-3 mb-2">
+                         <span className={`px-2 py-0.5 rounded-lg text-[7px] font-black uppercase tracking-widest shadow-lg ${
+                           log?.status === 'error' ? 'bg-red-500/20 text-red-400 border border-red-500/20' : 
+                           log?.status === 'warning' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/20' : 
+                           log?.status === 'success' ? 'bg-green-500/20 text-green-400 border border-green-500/20' : 
+                           'bg-blue-500/20 text-blue-400 border border-blue-500/20'
+                         }`}>{log?.type || 'event'}</span>
+                         <span className="text-gray-700 text-[8px] font-black italic">{log?.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '...'}</span>
+                         <div className="h-[1px] flex-1 bg-white/[0.02] group-hover/log:bg-white/[0.05] transition-colors" />
+                      </div>
+                      <p className="text-gray-400 leading-relaxed pl-1">{log?.message || 'Empty Log Message'}</p>
+                      {log?.metadata && (
+                        <pre className="text-[7px] text-gray-600 mt-3 bg-white/[0.02] p-4 rounded-2xl overflow-x-auto border border-white/[0.02] group-hover/log:border-white/[0.05] transition-all">
+                          {JSON.stringify(log.metadata, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {settingsTab === 'extension' && isPopup && (
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+              <section>
+                <div className="flex items-center gap-3 mb-6">
+                  <Shield className="w-4 h-4 text-gray-400" />
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">Session Security</p>
+                </div>
+                <div className="space-y-4">
+                  <div className="p-6 rounded-[28px] bg-white/[0.03] border border-white/5 space-y-4 hover:bg-white/10 transition-all">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Auto-Lock Timer</span>
+                      <span className="text-[11px] font-black" style={{ color: theme.primary }}>{sessionTimeout} Minutes</span>
+                    </div>
+                    <input 
+                      type="range" min="5" max="60" step="5"
+                      value={sessionTimeout}
+                      onChange={(e) => setSessionTimeout(parseInt(e.target.value))}
+                      className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-current" 
+                      style={{ color: theme.primary }}
+                    />
+                    <div className="flex justify-between text-[7px] font-black text-gray-600 uppercase">
+                      <span>5m</span>
+                      <span>15m</span>
+                      <span>30m</span>
+                      <span>60m</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="pt-8 border-t border-white/5">
+                <div className="flex items-center gap-3 mb-6">
+                  <Activity className="w-4 h-4 text-gray-400" />
+                  <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">Telemetry & Verbosity</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                   <button 
+                     onClick={() => setLogVerbosity('compact')}
+                     className={`p-5 rounded-[24px] border transition-all flex flex-col gap-2 ${logVerbosity === 'compact' ? 'bg-white/10 border-white/20' : 'bg-white/5 border-transparent opacity-40 hover:opacity-100'}`}
+                   >
+                      <span className="text-[10px] font-black text-white uppercase tracking-widest text-left">Compact</span>
+                      <span className="text-[8px] text-gray-500 text-left">Summary only</span>
+                   </button>
+                   <button 
+                     onClick={() => setLogVerbosity('verbose')}
+                     className={`p-5 rounded-[24px] border transition-all flex flex-col gap-2 ${logVerbosity === 'verbose' ? 'bg-white/10 border-white/20 shadow-lg shadow-black/20' : 'bg-white/5 border-transparent opacity-40 hover:opacity-100'}`}
+                   >
+                      <span className="text-[10px] font-black text-white uppercase tracking-widest text-left" style={{ color: logVerbosity === 'verbose' ? theme.primary : undefined }}>Verbose</span>
+                      <span className="text-[8px] text-gray-500 text-left">Full RPC meta</span>
+                   </button>
+                </div>
+              </section>
+            </div>
+          )}
+        </div>
+        <div className="mt-6 pt-4 border-t border-white/5">
+           <Button onClick={() => setOpenApps(prev => prev.filter(x => x !== 'settings'))} className="w-full py-4 rounded-2xl font-black uppercase tracking-widest text-[9px]" style={{ background: `linear-gradient(to right, ${theme.primary}, ${theme.secondary})` }}>Done</Button>
+        </div>
+      </div>
+    );
+  };
 
   const theme = THEMES[currentThemeIdx];
 
@@ -896,11 +1548,11 @@ const App = () => {
     '--theme-secondary': theme.secondary
   };
 
-  if (isPopup) {
+  const renderWalletDashboard = (customClasses = "w-[380px] min-h-[600px]") => {
     return (
       <div 
         style={themeStyles}
-        className="w-[380px] min-h-[600px] bg-bolt-dark text-white overflow-hidden flex flex-col p-6 font-sans selection:bg-bolt-blue/30 relative"
+        className={`${customClasses} bg-bolt-dark text-white overflow-hidden flex flex-col p-6 font-sans selection:bg-bolt-blue/30 relative`}
       >
         {/* Security Overlay */}
         <AnimatePresence mode="wait">
@@ -1036,17 +1688,21 @@ const App = () => {
             </div>
 
             <Settings 
-               className={`w-5 h-5 cursor-pointer transition-colors ${showSettings ? 'text-bolt-blue' : 'text-gray-400 hover:text-white'}`} 
+               className={`w-5 h-5 cursor-pointer transition-colors ${openApps.includes('settings') ? 'text-bolt-blue' : 'text-gray-400 hover:text-white'}`} 
                onClick={async () => {
-                  if (showSettings) {
-                     setMnemonic('');
-                     setShowMnemonicPlain(false);
-                  }
-                  setShowSettings(!showSettings);
+                  handleDockClick('settings');
                }}
-               style={{ color: showSettings ? theme.primary : undefined }}
+               style={{ color: openApps.includes('settings') ? theme.primary : undefined }}
             />
-            <X className="w-5 h-5 text-gray-400 hover:text-white cursor-pointer transition-colors" />
+            <X 
+               className="w-5 h-5 text-gray-400 hover:text-red-400 cursor-pointer transition-colors" 
+               onClick={() => {
+                  setIsLocked(true);
+                  setMnemonic('');
+                  setShowMnemonicPlain(false);
+               }}
+               title="Lock Vault"
+            />
           </div>
         </div>
 
@@ -1123,315 +1779,8 @@ const App = () => {
               </div>
               <div className="mt-8">
                  <Button onClick={handleAddCustomNetwork} disabled={!newNetwork.name || !newNetwork.id || !newNetwork.rpc || !newNetwork.currencySymbol} className="w-full py-4 rounded-2xl" style={{ background: `linear-gradient(to right, ${theme.primary}, ${theme.secondary})` }}>Save Network</Button>
-              </div>
-            </motion.div>
-          )}
-
-          {showSettings && (
-            <motion.div 
-              initial={{ opacity: 0, y: 50, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 50, scale: 0.95 }}
-              className="absolute inset-4 z-[70] bg-[#0A0B10]/98 backdrop-blur-3xl p-6 flex flex-col rounded-[40px] border border-white/10 shadow-[0_0_100px_rgba(0,0,0,0.8)]"
-            >
-              <div className="flex justify-between items-center mb-6">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-2xl bg-white/5 border border-white/10" style={{ color: theme.primary }}>
-                    <Settings className="w-5 h-5" />
-                  </div>
-                  <h3 className="text-xl font-black tracking-tight text-white">Vault Configuration</h3>
-                </div>
-                <X className="w-6 h-6 text-gray-500 cursor-pointer hover:text-white transition-colors" onClick={() => setShowSettings(false)} />
-              </div>
-
-              {/* Settings Tabs */}
-              <div className="flex gap-2 p-1.5 bg-white/5 rounded-[22px] mb-8 relative z-10 border border-white/5">
-                {[
-                   { id: 'general', icon: ShieldCheck, label: 'Vault' },
-                   { id: 'appearance', icon: Palette, label: 'Look' },
-                   { id: 'currency', icon: Banknote, label: 'Cash' },
-                   { id: 'extension', icon: Cpu, label: 'Bolt' },
-                   { id: 'logs', icon: Terminal, label: 'Logs' }
-                ].filter(t => t.id !== 'extension' || isPopup).map(tab => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setSettingsTab(tab.id as any)}
-                    className={`flex-1 py-3 px-2 rounded-[18px] transition-all duration-500 flex flex-col items-center gap-1.5 relative group ${settingsTab === tab.id ? 'bg-white/10 shadow-[0_0_20px_rgba(255,255,255,0.05)]' : 'hover:bg-white/[0.03]'}`}
-                  >
-                    <tab.icon className={`w-4 h-4 transition-all duration-300 ${settingsTab === tab.id ? 'scale-110' : 'text-gray-500 group-hover:text-gray-300'}`} style={{ color: settingsTab === tab.id ? theme.primary : undefined }} />
-                    <span className={`text-[8px] font-black uppercase tracking-[0.2em] transition-all ${settingsTab === tab.id ? 'text-white' : 'text-gray-600 group-hover:text-gray-400'}`}>{tab.label}</span>
-                    {settingsTab === tab.id && (
-                       <motion.div layoutId="activeTab" className="absolute -bottom-1 w-1 h-1 rounded-full" style={{ backgroundColor: theme.primary, boxShadow: `0 0 10px ${theme.primary}` }} />
-                    )}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex-1 overflow-y-auto pr-1 space-y-6 scrollbar-hide">
-                {settingsTab === 'general' && (
-                  <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                    <div className="relative">
-                      <div className="flex justify-between items-center mb-4">
-                         <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">Security Phrase</p>
-                         <div className="px-2 py-0.5 rounded-md bg-green-500/10 border border-green-500/20 text-[7px] font-black text-green-500 uppercase tracking-widest">Encrypted</div>
-                      </div>
-                      
-                      <div className="p-8 rounded-[32px] bg-white/[0.03] border border-white/5 relative overflow-hidden group shadow-2xl">
-                        <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent pointer-events-none" />
-                        
-                        <div className={`grid grid-cols-3 gap-3 transition-all duration-700 ${!showMnemonicPlain ? 'blur-2xl opacity-20 scale-95 select-none' : 'opacity-100 scale-100'}`}>
-                          {(showMnemonicPlain ? (mnemonic || "word ".repeat(12)).split(' ') : Array(12).fill('••••')).map((word, i) => (
-                            <div key={i} className="bg-white/5 rounded-xl py-2.5 px-3 border border-white/5 flex flex-col items-center gap-1 group/word hover:bg-white/10 transition-all">
-                               <span className="text-[7px] font-black text-gray-700 uppercase">{i + 1}</span>
-                               <span className="text-[11px] font-black tracking-tight" style={{ color: theme.primary }}>{word}</span>
-                            </div>
-                          ))}
-                        </div>
-
-                        <button 
-                          onClick={async () => {
-                            if (!showMnemonicPlain && !mnemonic) {
-                              const mnemon = await core.getSession();
-                              setMnemonic(mnemon || '');
-                            }
-                            setShowMnemonicPlain(!showMnemonicPlain);
-                          }}
-                          className={`absolute inset-0 flex flex-col items-center justify-center transition-all duration-500 z-20 ${showMnemonicPlain ? 'opacity-0 pointer-events-none' : 'bg-black/40 backdrop-blur-md opacity-100'}`}
-                        >
-                           <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-3 shadow-2xl group-hover:scale-110 transition-transform">
-                              <Eye className="w-6 h-6 text-white" />
-                           </div>
-                           <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white">Reveal Vault Phrase</span>
-                        </button>
-                      </div>
-
-                      {showMnemonicPlain && (
-                         <div className="flex justify-center mt-4">
-                            <button onClick={() => setShowMnemonicPlain(false)} className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 transition-all">
-                               <EyeOff className="w-3 h-3 text-gray-500" />
-                               <span className="text-[9px] font-black uppercase tracking-widest text-gray-500">Hide Phrase</span>
-                            </button>
-                         </div>
-                      )}
-                    </div>
-                    
-                    <div className="pt-8 border-t border-white/5">
-                        <div className="flex items-center gap-2 mb-4">
-                           <p className="text-[10px] font-black text-red-500/60 uppercase tracking-[0.3em]">Danger Zone</p>
-                           <div className="h-[1px] flex-1 bg-red-500/10" />
-                        </div>
-                        <Button 
-                          variant="glass" 
-                          className="w-full border-red-500/10 text-red-500/80 hover:text-red-400 hover:bg-red-500/10 py-5 rounded-[24px] text-[10px] font-black uppercase tracking-widest shadow-lg flex items-center justify-center gap-3 transition-all" 
-                          onClick={handleResetVault}
-                        >
-                           <Trash2 className="w-4 h-4 opacity-50" />
-                           Reset Vault Data
-                        </Button>
-                    </div>
-                  </div>
-                )}
-                {settingsTab === 'appearance' && (
-                  <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                    <div>
-                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em] mb-6">Master Themes</p>
-                      <div className="grid grid-cols-2 gap-4">
-                        {THEMES.map((t, idx) => (
-                          <motion.div 
-                            key={t.id}
-                            whileHover={{ y: -4, scale: 1.02 }}
-                            whileTap={{ scale: 0.98 }}
-                            onClick={() => setCurrentThemeIdx(idx)}
-                            className={`p-5 rounded-[28px] border-2 cursor-pointer transition-all flex flex-col items-center gap-4 relative overflow-hidden group ${currentThemeIdx === idx ? 'bg-white/10 border-white/20 shadow-2xl' : 'bg-white/5 border-transparent hover:bg-white/10'}`}
-                          >
-                            <div className="absolute top-0 right-0 w-16 h-16 blur-2xl rounded-full -mr-8 -mt-8 opacity-20" style={{ backgroundColor: t.primary }} />
-                            <div className="w-12 h-12 rounded-2xl shadow-2xl flex items-center justify-center transition-transform group-hover:rotate-12" style={{ background: `linear-gradient(135deg, ${t.primary}, ${t.secondary})` }}>
-                               <Palette className="w-6 h-6 text-white" />
-                            </div>
-                            <span className="text-[10px] font-black tracking-[0.2em] text-white uppercase">{t.name}</span>
-                          </motion.div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="pt-8 border-t border-white/5">
-                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em] mb-6">Engine Overrides</p>
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between p-6 rounded-[24px] bg-white/[0.03] border border-white/5 group hover:bg-white/5 transition-all">
-                          <div className="flex items-center gap-4">
-                             <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: customColors.primary }} />
-                             <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Primary Core</span>
-                          </div>
-                          <input 
-                            type="color" 
-                            value={customColors.primary} 
-                            onChange={(e) => setCustomColors({ ...customColors, primary: e.target.value })}
-                            className="bg-transparent border-none w-10 h-10 cursor-pointer rounded-2xl overflow-hidden shadow-2xl"
-                          />
-                        </div>
-                        <div className="flex items-center justify-between p-6 rounded-[24px] bg-white/[0.03] border border-white/5 group hover:bg-white/5 transition-all">
-                          <div className="flex items-center gap-4">
-                             <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: customColors.secondary }} />
-                             <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Accent Glow</span>
-                          </div>
-                          <input 
-                            type="color" 
-                            value={customColors.secondary} 
-                            onChange={(e) => setCustomColors({ ...customColors, secondary: e.target.value })}
-                            className="bg-transparent border-none w-10 h-10 cursor-pointer rounded-2xl overflow-hidden shadow-2xl"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {settingsTab === 'currency' && (
-                  <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                    <div>
-                      <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em] mb-6">Settlement Currency</p>
-                      <div className="grid grid-cols-1 gap-3">
-                        {[
-                          { id: 'USD', name: 'US Dollar', icon: '🇺🇸' },
-                          { id: 'EUR', name: 'Euro', icon: '🇪🇺' },
-                          { id: 'GBP', name: 'British Pound', icon: '🇬🇧' },
-                          { id: 'JPY', name: 'Japanese Yen', icon: '🇯🇵' },
-                          { id: 'CNY', name: 'Chinese Yuan', icon: '🇨🇳' },
-                          { id: 'BTC', name: 'Bitcoin', icon: '₿' },
-                          { id: 'ETH', name: 'Ethereum', icon: 'Ξ' }
-                        ].map(c => (
-                          <motion.div 
-                            key={c.id}
-                            whileHover={{ x: 4 }}
-                            onClick={() => setSelectedCurrency(c.id)}
-                            className={`p-5 rounded-[24px] border transition-all cursor-pointer flex items-center justify-between group ${selectedCurrency === c.id ? 'bg-white/10 border-white/20 shadow-xl' : 'bg-white/[0.03] border-transparent hover:bg-white/5'}`}
-                          >
-                            <div className="flex items-center gap-4">
-                               <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-xl shadow-inner group-hover:scale-110 transition-transform">
-                                  {c.icon}
-                               </div>
-                               <div>
-                                  <p className="text-xs font-black text-white">{c.name}</p>
-                                  <p className="text-[9px] font-bold text-gray-600 uppercase tracking-widest">{c.id}</p>
-                               </div>
-                            </div>
-                            {selectedCurrency === c.id && (
-                               <div className="w-6 h-6 rounded-full flex items-center justify-center bg-white/10" style={{ color: theme.primary }}>
-                                  <CheckCircle2 className="w-4 h-4" />
-                                </div>
-                            )}
-                          </motion.div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {settingsTab === 'logs' && (
-                  <div className="h-full flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-500">
-                    <div className="flex justify-between items-center mb-6">
-                      <div className="flex items-center gap-3">
-                         <Activity className="w-4 h-4 text-gray-500 animate-pulse" />
-                         <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">Telemetry Stream</p>
-                      </div>
-                      <div className="flex gap-4">
-                         <button onClick={() => setLogs([])} className="text-[9px] font-black text-red-500/60 uppercase tracking-widest hover:text-red-400 transition-colors">Wipe Console</button>
-                         <button className="text-[9px] font-black text-blue-500/60 uppercase tracking-widest hover:text-blue-400 transition-colors flex items-center gap-1.5">
-                            <Download className="w-3 h-3" />
-                            Export
-                         </button>
-                      </div>
-                    </div>
-                    <div className="flex-1 bg-[#050608] rounded-[32px] border border-white/5 p-6 font-mono text-[9px] overflow-y-auto space-y-4 min-h-[400px] shadow-inner scrollbar-hide">
-                      {!logs || logs.length === 0 ? (
-                        <div className="h-full flex flex-col items-center justify-center opacity-10 gap-4">
-                           <RefreshCw className="w-10 h-10 animate-spin-slow" />
-                           <p className="uppercase tracking-[0.5em] font-black text-xs">Awaiting Network Events...</p>
-                        </div>
-                      ) : (
-                        (logs || []).slice().reverse().map(log => (
-                          <div key={log?.id || Math.random().toString()} className="border-b border-white/[0.02] pb-4 last:border-0 group/log">
-                            <div className="flex items-center gap-3 mb-2">
-                               <span className={`px-2 py-0.5 rounded-lg text-[7px] font-black uppercase tracking-widest shadow-lg ${
-                                 log?.status === 'error' ? 'bg-red-500/20 text-red-400 border border-red-500/20' : 
-                                 log?.status === 'warning' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/20' : 
-                                 log?.status === 'success' ? 'bg-green-500/20 text-green-400 border border-green-500/20' : 
-                                 'bg-blue-500/20 text-blue-400 border border-blue-500/20'
-                               }`}>
-                                 {log?.type || 'event'}
-                               </span>
-                               <span className="text-gray-700 text-[8px] font-black italic">{log?.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '...'}</span>
-                               <div className="h-[1px] flex-1 bg-white/[0.02] group-hover/log:bg-white/[0.05] transition-colors" />
-                            </div>
-                            <p className="text-gray-400 leading-relaxed pl-1">{log?.message || 'Empty Log Message'}</p>
-                            {log?.metadata && (
-                              <pre className="text-[7px] text-gray-600 mt-3 bg-white/[0.02] p-4 rounded-2xl overflow-x-auto border border-white/[0.02] group-hover/log:border-white/[0.05] transition-all">
-                                {JSON.stringify(log.metadata, null, 2)}
-                              </pre>
-                            )}
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {settingsTab === 'extension' && isPopup && (
-                  <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                    <section>
-                      <div className="flex items-center gap-3 mb-6">
-                        <Shield className="w-4 h-4 text-gray-400" />
-                        <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">Session Security</p>
-                      </div>
-                      <div className="space-y-4">
-                        <div className="p-6 rounded-[28px] bg-white/[0.03] border border-white/5 space-y-4 hover:bg-white/10 transition-all">
-                          <div className="flex justify-between items-center">
-                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Auto-Lock Timer</span>
-                            <span className="text-[11px] font-black" style={{ color: theme.primary }}>{sessionTimeout} Minutes</span>
-                          </div>
-                          <input 
-                            type="range" min="5" max="60" step="5"
-                            value={sessionTimeout}
-                            onChange={(e) => setSessionTimeout(parseInt(e.target.value))}
-                            className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-current" 
-                            style={{ color: theme.primary }}
-                          />
-                          <div className="flex justify-between text-[7px] font-black text-gray-600 uppercase">
-                            <span>5m</span>
-                            <span>15m</span>
-                            <span>30m</span>
-                            <span>60m</span>
-                          </div>
-                        </div>
-                      </div>
-                    </section>
-
-                    <section className="pt-8 border-t border-white/5">
-                      <div className="flex items-center gap-3 mb-6">
-                        <Activity className="w-4 h-4 text-gray-400" />
-                        <p className="text-[10px] font-black text-gray-500 uppercase tracking-[0.3em]">Telemetry & Verbosity</p>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                         <button 
-                           onClick={() => setLogVerbosity('compact')}
-                           className={`p-5 rounded-[24px] border transition-all flex flex-col gap-2 ${logVerbosity === 'compact' ? 'bg-white/10 border-white/20' : 'bg-white/5 border-transparent opacity-40 hover:opacity-100'}`}
-                         >
-                            <span className="text-[10px] font-black text-white uppercase tracking-widest text-left">Compact</span>
-                            <span className="text-[8px] text-gray-500 text-left">Summary only</span>
-                         </button>
-                         <button 
-                           onClick={() => setLogVerbosity('verbose')}
-                           className={`p-5 rounded-[24px] border transition-all flex flex-col gap-2 ${logVerbosity === 'verbose' ? 'bg-white/10 border-white/20 shadow-lg shadow-black/20' : 'bg-white/5 border-transparent opacity-40 hover:opacity-100'}`}
-                         >
-                            <span className="text-[10px] font-black text-white uppercase tracking-widest text-left" style={{ color: logVerbosity === 'verbose' ? theme.primary : undefined }}>Verbose</span>
-                            <span className="text-[8px] text-gray-500 text-left">Full RPC meta</span>
-                         </button>
-                      </div>
-                    </section>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-6 pt-6 border-t border-white/5">
-                 <Button onClick={() => setShowSettings(false)} className="w-full py-4 rounded-3xl font-black uppercase tracking-widest text-[10px]" style={{ background: `linear-gradient(to right, ${theme.primary}, ${theme.secondary})` }}>Done</Button>
+                 {/* Settings are now rendered inside DesktopWindow */}
+                 <Button onClick={() => setShowAddNetwork(false)} className="w-full py-4 rounded-2xl mt-2" style={{ background: `linear-gradient(to right, ${theme.primary}, ${theme.secondary})` }}>Done</Button>
               </div>
             </motion.div>
           )}
@@ -1760,7 +2109,10 @@ const App = () => {
                                type="number" 
                                className="bg-transparent text-xl font-black text-white outline-none w-full tracking-tighter"
                                value={gasSettings.priorityFee}
-                               onChange={(e) => setGasSettings({ ...gasSettings, priorityFee: e.target.value })}
+                               onChange={(e) => {
+                                 const val = e.target.value;
+                                 setGasSettings({ ...gasSettings, priorityFee: val });
+                               }}
                              />
                              <span className="text-[9px] font-bold text-gray-700">GWEI</span>
                           </div>
@@ -1775,7 +2127,10 @@ const App = () => {
                                type="number" 
                                className="bg-transparent text-xl font-black text-white outline-none w-full tracking-tighter"
                                value={gasSettings.maxFee}
-                               onChange={(e) => setGasSettings({ ...gasSettings, maxFee: e.target.value })}
+                               onChange={(e) => {
+                                 const val = e.target.value;
+                                 setGasSettings({ ...gasSettings, maxFee: val });
+                               }}
                              />
                              <span className="text-[9px] font-bold text-gray-700">GWEI</span>
                           </div>
@@ -1792,7 +2147,10 @@ const App = () => {
                          type="number" 
                          className="bg-transparent text-3xl font-black text-white outline-none w-full tracking-tighter relative z-10"
                          value={gasSettings.gasLimit}
-                         onChange={(e) => setGasSettings({ ...gasSettings, gasLimit: e.target.value })}
+                         onChange={(e) => {
+                           const val = e.target.value;
+                           setGasSettings({ ...gasSettings, gasLimit: val });
+                         }}
                        />
                        <p className="text-[10px] text-gray-600 font-bold mt-3 uppercase tracking-wider">Recommended: <span className="underline decoration-dotted transition-colors hover:text-white cursor-pointer" onClick={() => setGasSettings({...gasSettings, gasLimit: '21000'})} style={{ color: theme.primary }}>21000</span></p>
                     </div>
@@ -1801,15 +2159,15 @@ const App = () => {
                        <div className="flex justify-between items-center">
                           <p className="text-xs font-bold text-gray-500">Expected Total</p>
                           <div className="text-right">
-                             <p className="text-sm font-black text-white tracking-tight italic">{"<$" + (parseFloat(gasSettings.priorityFee) * parseInt(gasSettings.gasLimit) / 1e9 * (prices[selectedChain] || 0)).toFixed(2)}</p>
-                             <p className="text-[9px] font-bold text-gray-600 uppercase tracking-widest">{(parseFloat(gasSettings.priorityFee) * parseInt(gasSettings.gasLimit) / 1e9).toFixed(5)} {chains.find(c => c.id === selectedChain)?.name.split(' ')[0]}</p>
+                             <p className="text-sm font-black text-white tracking-tight italic">{"<$" + (parseFloat(gasSettings.priorityFee || '0') * parseInt(gasSettings.gasLimit || '0') / 1e9 * (prices[selectedChain] || 0)).toFixed(2)}</p>
+                             <p className="text-[9px] font-bold text-gray-600 uppercase tracking-widest">{(parseFloat(gasSettings.priorityFee || '0') * parseInt(gasSettings.gasLimit || '0') / 1e9).toFixed(5)} {chains.find(c => c.id === selectedChain)?.name.split(' ')[0]}</p>
                           </div>
                        </div>
                        <div className="flex justify-between items-center text-xs">
                           <p className="text-xs font-bold text-gray-500">Maximum possible</p>
                           <div className="text-right">
-                             <p className="text-sm font-black text-white tracking-tight italic opacity-60">{"<$" + (parseFloat(gasSettings.maxFee) * parseInt(gasSettings.gasLimit) / 1e9 * (prices[selectedChain] || 0)).toFixed(2)}</p>
-                             <p className="text-[9px] font-bold text-gray-700 uppercase tracking-widest">{(parseFloat(gasSettings.maxFee) * parseInt(gasSettings.gasLimit) / 1e9).toFixed(5)} {chains.find(c => c.id === selectedChain)?.name.split(' ')[0]}</p>
+                             <p className="text-sm font-black text-white tracking-tight italic opacity-60">{"<$" + (parseFloat(gasSettings.maxFee || '0') * parseInt(gasSettings.gasLimit || '0') / 1e9 * (prices[selectedChain] || 0)).toFixed(2)}</p>
+                             <p className="text-[9px] font-bold text-gray-700 uppercase tracking-widest">{(parseFloat(gasSettings.maxFee || '0') * parseInt(gasSettings.gasLimit || '0') / 1e9).toFixed(5)} {chains.find(c => c.id === selectedChain)?.name.split(' ')[0]}</p>
                           </div>
                        </div>
                     </div>
@@ -2387,31 +2745,42 @@ const App = () => {
                   boxShadow: showHistory ? `0 0 20px ${theme.primary}30` : 'none',
                   background: showHistory ? `linear-gradient(135deg, ${theme.primary}20, ${theme.secondary}20)` : undefined 
                 }}
-                onClick={() => { setShowHistory(!showHistory); setShowContracts(false); setShowNFTs(false); }}
+                onClick={() => { setShowHistory(!showHistory); setShowContracts(false); setShowNFTs(false); setShowBustaBolt(false); }}
               >
                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: showHistory ? theme.primary : '#444', filter: showHistory ? `drop-shadow(0 0 5px ${theme.primary})` : 'none' }} />
                  <span className="text-[10px] font-black uppercase tracking-widest text-white/90">Activity</span>
               </div>
              <div 
                 className={`px-3 py-1.5 rounded-lg border flex items-center gap-2 cursor-pointer transition-all ${showContracts ? 'bg-white/15 border-white/30' : 'bg-white/5 border-white/10 hover:bg-white/10'}`} 
-                onClick={() => { setShowContracts(!showContracts); setShowNFTs(false); setShowHistory(false); }}
+                onClick={() => { setShowContracts(!showContracts); setShowNFTs(false); setShowHistory(false); setShowBustaBolt(false); }}
               >
                 <Cpu className="w-3 h-3" style={{ color: showContracts ? theme.primary : 'inherit' }} />
                 <span className="text-[10px] font-black uppercase text-gray-300">Contracts</span>
              </div>
               <div 
                  className={`px-3 py-1.5 rounded-lg border flex items-center gap-2 cursor-pointer transition-all ${showNFTs ? 'bg-white/15 border-white/30' : 'bg-white/5 border-white/10 hover:bg-white/10'}`} 
-                 onClick={() => { setShowNFTs(!showNFTs); setShowContracts(false); setShowHistory(false); }}
+                 onClick={() => { setShowNFTs(!showNFTs); setShowContracts(false); setShowHistory(false); setShowBustaBolt(false); }}
               >
                  <Zap className="w-3 h-3" style={{ color: showNFTs ? theme.primary : 'inherit' }} />
                  <span className="text-[10px] font-black uppercase text-gray-300">NFTs</span>
+              </div>
+              <div 
+                 className={`px-3 py-1.5 rounded-lg border flex items-center gap-2 cursor-pointer transition-all ${showBustaBolt ? 'bg-white/15 border-white/30' : 'bg-white/5 border-white/10 hover:bg-white/10'}`} 
+                 onClick={() => { setShowBustaBolt(!showBustaBolt); setShowNFTs(false); setShowContracts(false); setShowHistory(false); }}
+              >
+                 <Activity className="w-3 h-3" style={{ color: showBustaBolt ? theme.primary : 'inherit' }} />
+                 <span className="text-[10px] font-black uppercase text-gray-300">BustaBolt</span>
               </div>
           </div>
         </motion.div>
 
         <div className="flex-1 space-y-3 overflow-y-auto pr-1 scrollbar-hide">
           <AnimatePresence mode="popLayout">
-            {showContracts ? (
+            {showBustaBolt ? (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="h-full flex flex-col">
+                <BustaBoltApp activeWallet={activeWallet} core={core} theme={theme} addLog={addCustomLog} />
+              </motion.div>
+            ) : showContracts ? (
               contracts.length === 0 ? (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-10 rounded-[32px] bg-white/5 border border-dashed border-white/10 text-center flex flex-col items-center justify-center gap-4">
                   <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-gray-500"><Cpu className="w-6 h-6" /></div>
@@ -2645,6 +3014,10 @@ const App = () => {
         </div>
       </div>
     );
+  };
+
+  if (isPopup) {
+    return renderWalletDashboard();
   }
 
   return (
@@ -2722,7 +3095,7 @@ const App = () => {
                        <div className="grid grid-cols-3 gap-2">
                           {recoveryMnemonic.map((word, i) => (
                              <div key={i} className="relative group">
-                                <span className="absolute left-2 top-1.5 text-[8px] font-black text-gray-600 uppercase group-focus-within:text-white/50">{i + 1}</span>
+                                <span className="absolute left-2 top-1.5 text-[8px] font-black text-gray-600 uppercase group-focus-within:text-white/55">{i + 1}</span>
                                 <input 
                                    type="text"
                                    className="w-full bg-white/5 border border-white/5 rounded-xl pt-4 pb-2 px-2 text-[10px] font-bold text-white outline-none focus:bg-white/10 focus:border-white/20 transition-all text-center"
@@ -2797,30 +3170,256 @@ const App = () => {
             </motion.div>
          )}
        </AnimatePresence>
-       <div className="absolute top-0 left-0 w-full h-full pointer-events-none opacity-40">
-          <div className="absolute -top-48 -left-48 w-[600px] h-[600px] rounded-full blur-[150px]" style={{ backgroundColor: `${theme.primary}20` }} />
-          <div className="absolute top-1/2 -right-48 w-[800px] h-[800px] rounded-full blur-[200px]" style={{ backgroundColor: `${theme.secondary}20` }} />
-       </div>
 
-       <div className="relative z-10 max-w-4xl mx-auto px-10 text-center">
-          <motion.img 
-            src="/0logov3.png" onClick={cycleTheme} 
-            className="w-32 h-32 mx-auto mb-12 cursor-pointer drop-shadow-[0_0_30px_rgba(255,255,255,0.2)]" 
-            animate={{ rotateY: [0, 180, 360] }} transition={{ duration: 15, repeat: Infinity, ease: "linear" }} 
-          />
-          <h1 className="text-8xl font-black mb-8 leading-[0.85] tracking-tighter" style={{ color: theme.primary }}>Boltwallet {theme.name}</h1>
-          <p className="text-2xl text-gray-500 mb-16 leading-relaxed max-w-2xl mx-auto font-medium">Enterprise-grade multi-chain security with an interactive {theme.name} interface. Switch themes by clicking the logo.</p>
-          <div className="flex items-center justify-center gap-6">
-            <Button onClick={handleCreateWallet} className="px-14 h-20 text-xl rounded-3xl" style={{ background: `linear-gradient(to right, ${theme.primary}, ${theme.secondary})` }}>Initialize Vault</Button>
-            <Button variant="glass" className="px-14 h-20 text-xl rounded-3xl">Import State</Button>
-          </div>
-       </div>
+       {!isLocked ? (
+         // Desktop Workspace View (unlocked)
+         <div className="absolute inset-0 z-10 flex flex-col overflow-hidden">
+           {/* Animated wallpaper */}
+           <div className="absolute inset-0 overflow-hidden pointer-events-none bg-[#030305] z-0">
+             <div className="absolute top-1/4 left-1/4 w-[600px] h-[600px] rounded-full blur-[150px] bg-cyan-500/10 animate-pulse" style={{ animationDuration: '8s' }} />
+             <div className="absolute bottom-1/4 right-1/4 w-[700px] h-[700px] rounded-full blur-[150px] bg-purple-500/10 animate-pulse" style={{ animationDuration: '12s' }} />
+             <div className="absolute inset-0 bg-[radial-gradient(#ffffff08_1px,transparent_1px)] [background-size:16px_16px] opacity-70" />
+           </div>
 
-       <div className="fixed bottom-12 flex gap-10 opacity-30">
-          <span className="text-[10px] font-black tracking-[0.5em] uppercase text-gray-400">Security</span>
-          <span className="text-[10px] font-black tracking-[0.5em] uppercase text-gray-400">Scale</span>
-          <span className="text-[10px] font-black tracking-[0.5em] uppercase text-gray-400">Speed</span>
-       </div>
+           {/* Desktop Shortcuts */}
+           <div className="absolute top-10 left-10 flex flex-col gap-6 z-10">
+             {Object.values(APPS).map((app) => {
+               const Icon = app.icon;
+               return (
+                 <div 
+                   key={app.id}
+                   onDoubleClick={() => handleDockClick(app.id)}
+                   className="flex flex-col items-center justify-center w-20 h-20 rounded-xl hover:bg-white/5 active:bg-white/10 border border-transparent hover:border-white/5 cursor-pointer group transition-all"
+                 >
+                   <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center shadow-lg group-hover:scale-105 transition-all" style={{ border: `1px solid ${app.color}20` }}>
+                     <Icon className="w-5 h-5" style={{ color: app.color }} />
+                   </div>
+                   <span className="text-[9px] font-black tracking-wide text-white/70 group-hover:text-white mt-2 text-center select-none truncate w-full px-1">{app.title}</span>
+                 </div>
+               );
+             })}
+           </div>
+
+           {/* Desktop App Windows */}
+           <div className="flex-1 p-8 relative z-10 overflow-hidden">
+             
+             {/* 1. Bolt Wallet App Window */}
+             {openApps.includes('wallet') && (
+               <DesktopWindow 
+                 id="wallet" 
+                 title="Bolt Wallet" 
+                 defaultWidth={420} 
+                 defaultHeight={700}
+                 onClose={() => {
+                   setOpenApps(prev => prev.filter(x => x !== 'wallet'));
+                   setAppLaunchStates(prev => {
+                     const copy = { ...prev };
+                     delete copy.wallet;
+                     return copy;
+                   });
+                 }}
+                 isMinimized={minimizedApps.includes('wallet')}
+                 onMinimize={() => setMinimizedApps(prev => [...prev, 'wallet'])}
+                 isActive={activeApp === 'wallet'}
+                 onFocus={() => setActiveApp('wallet')}
+                 launchState={appLaunchStates['wallet']}
+                 launchProgress={appLaunchProgress['wallet']}
+                 launchLogs={appLaunchLogs['wallet']}
+                 skipBoot={() => setAppLaunchStates(prev => ({ ...prev, wallet: 'ready' }))}
+               >
+                 {renderWalletDashboard("w-full h-full rounded-none border-0")}
+               </DesktopWindow>
+             )}
+
+             {/* 2. BustaBolt Crash App Window */}
+             {openApps.includes('bustabolt') && (
+               <DesktopWindow 
+                 id="bustabolt" 
+                 title="BustaBolt Game" 
+                 defaultWidth={900} 
+                 defaultHeight={600}
+                 onClose={() => {
+                   setOpenApps(prev => prev.filter(x => x !== 'bustabolt'));
+                   setAppLaunchStates(prev => {
+                     const copy = { ...prev };
+                     delete copy.bustabolt;
+                     return copy;
+                   });
+                 }}
+                 isMinimized={minimizedApps.includes('bustabolt')}
+                 onMinimize={() => setMinimizedApps(prev => [...prev, 'bustabolt'])}
+                 isActive={activeApp === 'bustabolt'}
+                 onFocus={() => setActiveApp('bustabolt')}
+                 launchState={appLaunchStates['bustabolt']}
+                 launchProgress={appLaunchProgress['bustabolt']}
+                 launchLogs={appLaunchLogs['bustabolt']}
+                 skipBoot={() => setAppLaunchStates(prev => ({ ...prev, bustabolt: 'ready' }))}
+               >
+                 <BustaBoltApp activeWallet={activeWallet} core={core} theme={theme} addLog={addCustomLog} />
+               </DesktopWindow>
+             )}
+
+             {/* 3. Telemetry Console Window */}
+             {openApps.includes('logs') && (
+               <DesktopWindow 
+                 id="logs" 
+                 title="Telemetry Log Console" 
+                 defaultWidth={700} 
+                 defaultHeight={480}
+                 onClose={() => {
+                   setOpenApps(prev => prev.filter(x => x !== 'logs'));
+                   setAppLaunchStates(prev => {
+                     const copy = { ...prev };
+                     delete copy.logs;
+                     return copy;
+                   });
+                 }}
+                 isMinimized={minimizedApps.includes('logs')}
+                 onMinimize={() => setMinimizedApps(prev => [...prev, 'logs'])}
+                 isActive={activeApp === 'logs'}
+                 onFocus={() => setActiveApp('logs')}
+                 launchState={appLaunchStates['logs']}
+                 launchProgress={appLaunchProgress['logs']}
+                 launchLogs={appLaunchLogs['logs']}
+                 skipBoot={() => setAppLaunchStates(prev => ({ ...prev, logs: 'ready' }))}
+               >
+                 <div className="h-full flex flex-col p-6 font-mono text-[10px] bg-[#050608] text-white">
+                   <div className="flex justify-between items-center mb-4">
+                     <span className="text-gray-500 uppercase tracking-widest text-[9px]">Live System Stream</span>
+                     <button onClick={() => setLogs([])} className="text-red-400 hover:text-red-300 font-bold uppercase text-[9px]">Clear Logs</button>
+                   </div>
+                   <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-hide">
+                     {logs.length === 0 ? (
+                       <div className="h-full flex items-center justify-center text-gray-700 uppercase tracking-[0.3em]">No System Logs</div>
+                     ) : (
+                       logs.slice().reverse().map((log: any, i) => (
+                         <div key={i} className="border-b border-white/[0.02] pb-2 last:border-0">
+                           <div className="flex items-center gap-2 text-[8px] mb-1">
+                             <span className={`px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest ${
+                               log.status === 'error' ? 'bg-red-500/20 text-red-400' :
+                               log.status === 'success' ? 'bg-green-500/20 text-green-400' :
+                               'bg-blue-500/20 text-blue-400'
+                             }`}>{log.type}</span>
+                             <span className="text-gray-600">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                           </div>
+                           <p className="text-gray-300">{log.message}</p>
+                         </div>
+                       ))
+                     )}
+                   </div>
+                 </div>
+               </DesktopWindow>
+             )}
+
+             {/* 4. Vault Settings Window */}
+             {openApps.includes('settings') && (
+               <DesktopWindow 
+                 id="settings" 
+                 title="Vault Settings" 
+                 defaultWidth={700} 
+                 defaultHeight={600}
+                 onClose={() => {
+                   setOpenApps(prev => prev.filter(x => x !== 'settings'));
+                   setAppLaunchStates(prev => {
+                     const copy = { ...prev };
+                     delete copy.settings;
+                     return copy;
+                   });
+                 }}
+                 isMinimized={minimizedApps.includes('settings')}
+                 onMinimize={() => setMinimizedApps(prev => [...prev, 'settings'])}
+                 isActive={activeApp === 'settings'}
+                 onFocus={() => setActiveApp('settings')}
+                 launchState={appLaunchStates['settings']}
+                 launchProgress={appLaunchProgress['settings']}
+                 launchLogs={appLaunchLogs['settings']}
+                 skipBoot={() => setAppLaunchStates(prev => ({ ...prev, settings: 'ready' }))}
+               >
+                 {renderSettingsContent()}
+               </DesktopWindow>
+             )}
+
+           </div>
+
+           {/* Dock Launcher Bar */}
+           <div className="h-24 flex items-center justify-center pb-6 relative z-30">
+             <div className="glass-glossy px-8 py-3 rounded-3xl border border-white/10 flex items-center gap-6 shadow-2xl relative">
+               
+               {/* Dock Apps */}
+               {[
+                 { id: 'wallet', title: 'Wallet', icon: Wallet, color: 'text-bolt-blue' },
+                 { id: 'bustabolt', title: 'BustaBolt', icon: Activity, color: 'text-purple-400 animate-pulse' },
+                 { id: 'logs', title: 'Console', icon: Terminal, color: 'text-green-400' },
+                 { id: 'settings', title: 'Settings', icon: Settings, color: 'text-orange-400' }
+               ].map(app => {
+                 const Icon = app.icon;
+                 const isOpen = openApps.includes(app.id);
+                 const isMinimized = minimizedApps.includes(app.id);
+                 const isLaunching = appLaunchStates[app.id] === 'launching';
+                 const isActive = activeApp === app.id && !isMinimized;
+                 
+                 return (
+                   <button 
+                     key={app.id}
+                     onClick={() => handleDockClick(app.id)}
+                     className="flex flex-col items-center gap-1 group relative active:scale-95 transition-all"
+                   >
+                     <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${
+                       isActive ? 'bg-white/15 border border-white/30 scale-105' : 
+                       isOpen ? 'bg-white/10 border border-white/20' : 'bg-white/5 opacity-50 hover:opacity-100 hover:scale-105'
+                     }`}>
+                       <Icon className={`w-6 h-6 ${app.color}`} style={{ color: APPS[app.id]?.color }} />
+                     </div>
+                     <span className="text-[7px] font-black uppercase tracking-widest text-gray-500 group-hover:text-white transition-colors">{app.title}</span>
+                     
+                     {/* Active indicator dot */}
+                     {isOpen && (
+                       <div 
+                         className={`absolute -bottom-1 w-1.5 h-1.5 rounded-full transition-all duration-300 ${
+                           isLaunching ? 'animate-ping' : ''
+                         }`}
+                         style={{ 
+                           backgroundColor: APPS[app.id]?.color,
+                           opacity: isMinimized ? 0.35 : 1,
+                           boxShadow: isActive ? `0 0 8px ${APPS[app.id]?.color}` : 'none'
+                         }} 
+                       />
+                     )}
+                   </button>
+                 );
+               })}
+             </div>
+           </div>
+         </div>
+       ) : (
+         // Landing Page View (locked)
+         <>
+           <div className="absolute top-0 left-0 w-full h-full pointer-events-none opacity-40">
+              <div className="absolute -top-48 -left-48 w-[600px] h-[600px] rounded-full blur-[150px]" style={{ backgroundColor: `${theme.primary}20` }} />
+              <div className="absolute top-1/2 -right-48 w-[800px] h-[800px] rounded-full blur-[200px]" style={{ backgroundColor: `${theme.secondary}20` }} />
+           </div>
+
+           <div className="relative z-10 max-w-4xl mx-auto px-10 text-center">
+              <motion.img 
+                src="/0logov3.png" onClick={cycleTheme} 
+                className="w-32 h-32 mx-auto mb-12 cursor-pointer drop-shadow-[0_0_30px_rgba(255,255,255,0.2)]" 
+                animate={{ rotateY: [0, 180, 360] }} transition={{ duration: 15, repeat: Infinity, ease: "linear" }} 
+              />
+              <h1 className="text-8xl font-black mb-8 leading-[0.85] tracking-tighter" style={{ color: theme.primary }}>Boltwallet {theme.name}</h1>
+              <p className="text-2xl text-gray-500 mb-16 leading-relaxed max-w-2xl mx-auto font-medium">Enterprise-grade multi-chain security with an interactive {theme.name} interface. Switch themes by clicking the logo.</p>
+              <div className="flex items-center justify-center gap-6">
+                <Button onClick={handleCreateWallet} className="px-14 h-20 text-xl rounded-3xl" style={{ background: `linear-gradient(to right, ${theme.primary}, ${theme.secondary})` }}>Initialize Vault</Button>
+                <Button variant="glass" className="px-14 h-20 text-xl rounded-3xl">Import State</Button>
+              </div>
+           </div>
+
+           <div className="fixed bottom-12 flex gap-10 opacity-30">
+              <span className="text-[10px] font-black tracking-[0.5em] uppercase text-gray-400">Security</span>
+              <span className="text-[10px] font-black tracking-[0.5em] uppercase text-gray-400">Scale</span>
+              <span className="text-[10px] font-black tracking-[0.5em] uppercase text-gray-400">Speed</span>
+           </div>
+         </>
+       )}
     </div>
   );
 };

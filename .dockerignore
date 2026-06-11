@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+pnpm-lock.yaml
+
+# Build Outputs
+dist/
+build/
+out/
+.next/
+.vercel/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment and Secrets
+.env
+.env.*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE and System Files
+.git/
+.github/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
